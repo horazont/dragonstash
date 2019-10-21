@@ -1,3 +1,6 @@
 [submodule "Fusepp"]
 	path = Fusepp
 	url = https://github.com/jachappell/Fusepp
+[submodule "lmdb-safe"]
+	path = lmdb-safe
+	url = https://github.com/ahupowerdns/lmdb-safe
