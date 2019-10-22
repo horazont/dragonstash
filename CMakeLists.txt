@@ -49,3 +49,11 @@ add_executable(dragonstash ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
 target_link_libraries(dragonstash fusepp)
 target_link_libraries(dragonstash lmdb-safe)
 target_include_directories(dragonstash PRIVATE include)
+
+
+# PLAYGROUND
+
+set(PLAYGROUND_SRCS
+    playground/main.cpp)
+add_executable(playground ${PLAYGROUND_SRCS})
+target_link_libraries(playground lmdb-safe)
