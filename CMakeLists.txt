@@ -30,6 +30,7 @@ set(DRAGONSTASH_HEADERS
     include/dragonstash-config.h
     include/backend.hpp
     include/cache/cache.hpp
+    include/cache/inode.hpp
     include/error.hpp
     include/fuse/buffer.hpp
     include/fuse/interface.hpp
@@ -41,6 +42,7 @@ set(DRAGONSTASH_HEADERS
 set(DRAGONSTASH_SRCS
     src/backend.cpp
     src/cache/cache.cpp
+    src/cache/inode.cpp
     src/error.cpp
     src/fuse/buffer.cpp
     src/fuse/interface.cpp
@@ -59,7 +61,8 @@ target_link_libraries(dragonstash libdragonstash)
 # UNIT TESTS
 
 set(TESTS_SRCS
-    tests/main.cpp)
+    tests/main.cpp
+    tests/cache/inode.cpp)
 
 add_executable(dragonstash-tests ${TESTS_SRCS})
 target_link_libraries(dragonstash-tests Catch2 lmdb-safe libdragonstash)
