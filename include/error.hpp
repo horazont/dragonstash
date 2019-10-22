@@ -9,6 +9,10 @@ enum failed_t {
     FAILED = 0,
 };
 
+struct ErrorResultHelper {
+    int error;
+};
+
 template <typename T>
 struct Result {
 public:
@@ -20,6 +24,12 @@ public:
 
     }
 
+    Result(ErrorResultHelper &&helper):
+        Result(FAILED, helper.error)
+    {
+
+    }
+
     Result(failed_t, int err):
         m_value(),
         m_errno(err)
@@ -27,9 +37,14 @@ public:
 
     }
 
+    Result(const Result &ref) = delete;
+    Result(Result &&src) = default;
+    Result &operator=(const Result &ref) = delete;
+    Result &operator=(Result &&src) = default;
+
 private:
-    const std::optional<T> m_value;
-    const int m_errno;
+    std::optional<T> m_value;
+    int m_errno;
 
 public:
     inline operator bool() const {
@@ -44,7 +59,11 @@ public:
         return &m_value.value();
     }
 
-    inline T &operator*() const {
+    inline const T &operator*() const {
+        return m_value.value();
+    }
+
+    inline T &operator*() {
         return m_value.value();
     }
 
@@ -60,6 +79,13 @@ public:
     Result():
         m_ok(true),
         m_errno(0)
+    {
+
+    }
+
+    Result(ErrorResultHelper &&helper):
+        m_ok(false),
+        m_errno(helper.error)
     {
 
     }
@@ -85,6 +111,23 @@ public:
     }
 
 };
+
+
+template<typename T>
+inline Result<T> make_result(T &&value)
+{
+    return Result<T>(std::forward<T>(value));
+}
+
+inline ErrorResultHelper make_result(failed_t, int err)
+{
+    return ErrorResultHelper{err};
+}
+
+inline Result<void> make_result()
+{
+    return Result<void>();
+}
 
 
 }
