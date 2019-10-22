@@ -46,7 +46,7 @@ set(DRAGONSTASH_SRCS
     src/fs.cpp)
 
 add_executable(dragonstash ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
-target_link_libraries(dragonstash fusepp)
+target_link_libraries(dragonstash PkgConfig::FUSE3)
 target_link_libraries(dragonstash lmdb-safe)
 target_include_directories(dragonstash PRIVATE include)
 
