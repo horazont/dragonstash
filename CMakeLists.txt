@@ -20,6 +20,10 @@ add_library(lmdb-safe STATIC ${LMDB_SAFE_SRCS})
 target_link_libraries(lmdb-safe PkgConfig::LMDB)
 target_include_directories(lmdb-safe PUBLIC ${LMDB_SAFE_DIR})
 
+## SUBMODULE: Catch2
+
+add_subdirectory(Catch2)
+
 # MAIN THING
 
 set(DRAGONSTASH_HEADERS
@@ -42,13 +46,23 @@ set(DRAGONSTASH_SRCS
     src/fuse/interface.cpp
     src/fuse/request.cpp
     src/local_backend.cpp
-    src/main.cpp
     src/fs.cpp)
 
-add_executable(dragonstash ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
-target_link_libraries(dragonstash PkgConfig::FUSE3)
-target_link_libraries(dragonstash lmdb-safe)
-target_include_directories(dragonstash PRIVATE include)
+add_library(libdragonstash STATIC ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
+target_link_libraries(libdragonstash PkgConfig::FUSE3)
+target_link_libraries(libdragonstash lmdb-safe)
+target_include_directories(libdragonstash PUBLIC include)
+
+add_executable(dragonstash src/main.cpp)
+target_link_libraries(dragonstash libdragonstash)
+
+# UNIT TESTS
+
+set(TESTS_SRCS
+    tests/main.cpp)
+
+add_executable(dragonstash-tests ${TESTS_SRCS})
+target_link_libraries(dragonstash-tests Catch2 lmdb-safe libdragonstash)
 
 
 # PLAYGROUND

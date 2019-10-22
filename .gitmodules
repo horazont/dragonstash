@@ -1,3 +1,6 @@
 [submodule "lmdb-safe"]
 	path = lmdb-safe
 	url = https://github.com/ahupowerdns/lmdb-safe
+[submodule "Catch2"]
+	path = Catch2
+	url = https://github.com/catchorg/Catch2
