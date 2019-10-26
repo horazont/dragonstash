@@ -46,6 +46,7 @@ void Inode::serialize(uint8_t *buf)
 {
     static const std::uint8_t version = 0x01;
     put(buf, version);
+    put(buf, parent);
     put(buf, mode);
     put(buf, size);
     put(buf, nblocks);
@@ -62,6 +63,7 @@ void Inode::serialize(uint8_t *buf)
 Result<Inode> Inode::parse_v1(const std::uint8_t *buf, size_t sz)
 {
     Inode result{};
+    if (!scan(buf, sz, result.parent)) return make_result(FAILED, -EINVAL);
     if (!scan(buf, sz, result.mode)) return make_result(FAILED, -EINVAL);
     if (!scan(buf, sz, result.size)) return make_result(FAILED, -EINVAL);
     if (!scan(buf, sz, result.nblocks)) return make_result(FAILED, -EINVAL);

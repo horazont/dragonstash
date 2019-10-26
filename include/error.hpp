@@ -16,7 +16,7 @@ struct ErrorResultHelper {
 template <typename T>
 struct Result {
 public:
-    template<typename U>
+    template<typename U, typename _ = typename std::enable_if<std::is_convertible<U, T>::value>::type>
     Result(U &&value):
         m_value(std::forward<U>(value)),
         m_errno(0)
@@ -24,8 +24,18 @@ public:
 
     }
 
-    Result(ErrorResultHelper &&helper):
-        Result(FAILED, helper.error)
+    template<typename U>
+    Result(const Result<U> &src):
+        m_value(bool(src) ? *src : T()),
+        m_errno(src.error())
+    {
+
+    }
+
+    template<typename U>
+    Result(Result<U> &&src):
+        m_value(bool(src) ? std::move(*src) : T()),
+        m_errno(src.error())
     {
 
     }
@@ -37,17 +47,25 @@ public:
 
     }
 
-    Result(const Result &ref) = delete;
-    Result(Result &&src) = default;
-    Result &operator=(const Result &ref) = delete;
-    Result &operator=(Result &&src) = default;
+    Result(ErrorResultHelper &&helper):
+        Result(FAILED, helper.error)
+    {
+
+    }
+
+    Result(const Result &ref) = default;
+    Result(Result &&src) noexcept = default;
+    Result &operator=(const Result &ref) = default;
+    Result &operator=(Result &&src) noexcept = default;
+
+    ~Result() = default;
 
 private:
     std::optional<T> m_value;
     int m_errno;
 
 public:
-    inline operator bool() const {
+    inline explicit operator bool() const {
         return m_value.has_value();
     }
 
@@ -102,7 +120,7 @@ private:
     const int m_errno;
 
 public:
-    inline operator bool() const {
+    inline explicit operator bool() const {
         return m_ok;
     }
 
@@ -114,9 +132,9 @@ public:
 
 
 template<typename T>
-inline Result<T> make_result(T &&value)
+inline Result<typename std::remove_reference<T>::type> make_result(T &&value)
 {
-    return Result<T>(std::forward<T>(value));
+    return Result<typename std::remove_reference<T>::type>(std::forward<T>(value));
 }
 
 inline ErrorResultHelper make_result(failed_t, int err)

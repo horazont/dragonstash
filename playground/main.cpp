@@ -2,7 +2,7 @@
 
 void clear(MDBEnv &env, MDBDbi &dbi) {
     auto trans = env.getRWTransaction();
-    auto cursor = trans.getCursor(dbi);
+    auto cursor = trans->getCursor(dbi);
     MDBOutVal key{};
     MDBOutVal value{};
     int rc;
@@ -13,7 +13,7 @@ void clear(MDBEnv &env, MDBDbi &dbi) {
     if (rc != MDB_NOTFOUND) {
         throw std::runtime_error("cursor.get(..., MDB_FIRST) returned "+std::to_string(rc));
     }
-    trans.commit();
+    trans->commit();
 }
 
 static constexpr std::uint64_t nkeys = 3;
@@ -27,15 +27,15 @@ void genkeys(MDBEnv &env, MDBDbi &dbi) {
         for (std::uint64_t j = 0; j < nvalues; ++j) {
             MDBInVal key(i);
             MDBInVal value(j | (i << shift_key_into_value));
-            trans.put(dbi, key, value);
+            trans->put(dbi, key, value);
         }
     }
-    trans.commit();
+    trans->commit();
 }
 
 void printpairs_plain(MDBEnv &env, MDBDbi &dbi) {
     auto trans = env.getROTransaction();
-    auto cursor = trans.getCursor(dbi);
+    auto cursor = trans->getCursor(dbi);
     int rc;
     MDBOutVal key{};
     MDBOutVal value{};
@@ -50,7 +50,7 @@ void printpairs_plain(MDBEnv &env, MDBDbi &dbi) {
 
 void printpairs_dup(MDBEnv &env, MDBDbi &dbi) {
     auto trans = env.getROTransaction();
-    auto cursor = trans.getCursor(dbi);
+    auto cursor = trans->getCursor(dbi);
     int rc;
     MDBOutVal key{};
     MDBOutVal value{};
@@ -65,7 +65,7 @@ void printpairs_dup(MDBEnv &env, MDBDbi &dbi) {
 
 void printpairs_nodup(MDBEnv &env, MDBDbi &dbi) {
     auto trans = env.getROTransaction();
-    auto cursor = trans.getCursor(dbi);
+    auto cursor = trans->getCursor(dbi);
     int rc;
     MDBOutVal key{};
     MDBOutVal value{};
@@ -81,7 +81,7 @@ void printpairs_nodup(MDBEnv &env, MDBDbi &dbi) {
 void printpairs_search(MDBEnv &env, MDBDbi &dbi, std::uint64_t key,
                        MDB_cursor_op initop = MDB_SET) {
     auto trans = env.getROTransaction();
-    auto cursor = trans.getCursor(dbi);
+    auto cursor = trans->getCursor(dbi);
     int rc;
     MDBInVal key_in(key);
     MDBOutVal keyv{};

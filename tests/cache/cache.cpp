@@ -72,152 +72,187 @@ public:
     }
 };
 
-SCENARIO("Inode serialization") {
-    GIVEN("an Inode") {
-        Dragonstash::Inode node{
-            .mode = S_IFDIR,
-            .size = 0x123456789abcdef0,
-            .nblocks = 0x223456789abcdef0,
-                    .uid = 0x12345678,
-                    .gid = 0x12345679,
-                    .atime = timespec{0x323456789abcdef0, 0x323456789abcdef1},
-                    .mtime = timespec{0x423456789abcdef0, 0x423456789abcdef1},
-                    .ctime = timespec{0x523456789abcdef0, 0x523456789abcdef1},
-        };
-        WHEN("serialized and deserialized") {
-            std::array<std::uint8_t, Dragonstash::Inode::serialized_size> buf{};
-            node.serialize(buf.data());
-            auto parse_result = Dragonstash::Inode::parse(buf.data(), buf.size());
 
-            THEN("parsing should succeed") {
-                CHECK(parse_result);
-                CHECK(parse_result.error() == 0);
+class TestSetup {
+public:
+    TestSetup():
+        m_cache(m_env.path())
+    {
+
+    }
+
+private:
+    TestEnvironment m_env;
+    Dragonstash::Cache m_cache;
+
+public:
+    inline TestEnvironment &env() {
+        return m_env;
+    }
+
+    inline Dragonstash::Cache &cache() {
+        return m_cache;
+    }
+};
+
+static constexpr ino_t nonexistent_inode = (Dragonstash::ROOT_INO | 2) ^ 1;
+
+SCENARIO("Inode cache behaviour")
+{
+    TestSetup setup;
+
+    GIVEN("An empty cache") {
+        Dragonstash::Cache &cache = setup.cache();
+
+        WHEN("looking up a name on the root inode") {
+            auto result = cache.lookup(Dragonstash::ROOT_INO, "foo");
+
+            THEN("it returns -ENOENT") {
+                CHECK(!result);
+                CHECK(result.error() == -ENOENT);
+            }
+        }
+
+        WHEN("looking up a name on the invalid inode") {
+            auto result = cache.lookup(Dragonstash::INVALID_INO, "foo");
+
+            THEN("it returns -EINVAL") {
+                CHECK(!result);
+                CHECK(result.error() == -EINVAL);
+            }
+        }
+
+        WHEN("looking up a name on a nonexistent inode") {
+            auto result = cache.lookup(nonexistent_inode, "foo");
+
+            THEN("it returns -ENOENT") {
+                CHECK(!result);
+                CHECK(result.error() == -ENOENT);
+            }
+        }
+    }
+
+    GIVEN("An empty cache and directory attributes") {
+        Dragonstash::Cache &cache = setup.cache();
+        Dragonstash::Backend::Stat attr{
+            .mode = S_IFDIR
+        };
+
+        WHEN("emplacing the attributes in the root inode") {
+            auto result = cache.emplace(Dragonstash::ROOT_INO, "foo",
+                                        attr);
+
+            THEN("the cache returns a new, valid inode number") {
+                REQUIRE(result);
+                CHECK(*result != Dragonstash::ROOT_INO);
+                CHECK(*result != Dragonstash::INVALID_INO);
             }
 
-            THEN("the values should be identical") {
-                CHECK(parse_result.error() == 0);
-                REQUIRE(parse_result);
-                CHECK(parse_result->mode == node.mode);
-                CHECK(parse_result->size == node.size);
-                CHECK(parse_result->nblocks == node.nblocks);
-                CHECK(parse_result->uid == node.uid);
-                CHECK(parse_result->gid == node.gid);
-                CHECK(parse_result->atime.tv_sec == node.atime.tv_sec);
-                CHECK(parse_result->atime.tv_nsec == node.atime.tv_nsec);
-                CHECK(parse_result->mtime.tv_sec == node.mtime.tv_sec);
-                CHECK(parse_result->mtime.tv_nsec == node.mtime.tv_nsec);
-                CHECK(parse_result->ctime.tv_sec == node.ctime.tv_sec);
-                CHECK(parse_result->ctime.tv_nsec == node.ctime.tv_nsec);
+            THEN("the entry should be found using lookup") {
+                auto lookup_result = cache.lookup(
+                            Dragonstash::ROOT_INO,
+                            "foo");
+                REQUIRE(result);
+                CHECK(lookup_result.error() == 0);
+                REQUIRE(lookup_result);
+                CHECK(*result == *lookup_result);
+            }
+
+            THEN("no other entries should have appeared magically") {
+                auto lookup_result = cache.lookup(
+                            Dragonstash::ROOT_INO,
+                            "bar");
+                CHECK(!lookup_result);
+                CHECK(lookup_result.error() == -ENOENT);
             }
         }
     }
 }
 
-
-SCENARIO("Inode caching")
+SCENARIO("Directory entry replacement")
 {
-    static constexpr Dragonstash::ino_t nonexistent_inode = (Dragonstash::ROOT_INO ^ 1) | 2;
-    TestEnvironment env;
-    GIVEN("An empty cache") {
-        Dragonstash::Cache cache(env.path());
-        WHEN("looking up an entry in the root") {
-            auto entry = cache.Lookup(Dragonstash::ROOT_INO, "foo");
-            THEN("the result is ENOENT") {
-                REQUIRE(!entry);
-                CHECK(entry.error() == -ENOENT);
-            }
-        }
+    TestSetup setup;
+    Dragonstash::Cache &cache = setup.cache();
+    Dragonstash::Backend::Stat attr{
+        .mode = S_IFDIR
+    };
 
-        WHEN("stat-ing the root inode") {
-            auto stat = cache.GetAttr(Dragonstash::ROOT_INO);
-            THEN("the result is not an error") {
-                REQUIRE(stat);
-            }
+    GIVEN("A directory with two entries") {
+        auto entry_result = cache.emplace(Dragonstash::ROOT_INO,
+                                          "entry",
+                                          attr);
+        REQUIRE(entry_result);
+        ino_t entry_ino = *entry_result;
 
-            THEN("the mode indicates a directory") {
-                REQUIRE(stat);
+        auto second_entry_result = cache.emplace(Dragonstash::ROOT_INO,
+                                                 "other",
+                                                 attr);
+        REQUIRE(second_entry_result);
+        ino_t second_entry_ino = *second_entry_result;
 
-                CHECK((stat->mode & S_IFDIR) == S_IFDIR);
-            }
-
-            THEN("the size is zero") {
-                REQUIRE(stat);
-
-                CHECK(stat->size == 0);
+        WHEN("Emplacing a new inode with a conflicting name") {
+            auto new_result = cache.emplace(Dragonstash::ROOT_INO,
+                                            "entry",
+                                            attr);
+            THEN("A new inode is returned") {
+                REQUIRE(new_result);
+                CHECK(*new_result != entry_ino);
             }
 
-            THEN("the nblocks is zero") {
-                REQUIRE(stat);
-
-                CHECK(stat->nblocks == 0);
-            }
-        }
-
-        WHEN("stat-ing a non-existent inode") {
-            auto stat = cache.GetAttr(nonexistent_inode);
-            THEN("the result is ENOENT") {
-                REQUIRE(!stat);
-                CHECK(stat.error() == -ENOENT);
-            }
-        }
-
-        WHEN("iterating the root inode") {
-            auto iter_result = cache.OpenDir(Dragonstash::ROOT_INO);
-            THEN("the iterator should be returned") {
-                REQUIRE(iter_result);
-                CHECK(*iter_result);
-            }
-
-            THEN("no entries should come from the iterator") {
-                REQUIRE(iter_result);
-                REQUIRE(*iter_result);
-
-                auto read_result = (*iter_result)->ReadDir();
-                CHECK(!read_result);
-                CHECK(read_result.error() == 0);
-            }
-        }
-
-        WHEN("iterating a non-existent inode") {
-            auto iter_result = cache.OpenDir(nonexistent_inode);
-            THEN("it fails with -ENOENT") {
-                REQUIRE(!iter_result);
-                CHECK(iter_result.error() == -ENOENT);
-            }
-        }
-
-        WHEN("calling PutAttr on a path in a directory inode") {
-            Dragonstash::Backend::Stat info{
-                .mode = S_IFDIR,
-                        .size = 1234,
-                        .uid = 1000,
-                        .gid = 1000,
-            };
-            auto put_result = cache.PutAttr(Dragonstash::ROOT_INO,
-                                            "bar",
-                                            info);
-
-            THEN("it succeeds and returns a new inode number") {
-                REQUIRE(put_result);
-                CHECK(*put_result != Dragonstash::ROOT_INO);
-            }
-
-            THEN("the path can be looked up") {
-                REQUIRE(put_result);
-                auto lookup_result = cache.Lookup(Dragonstash::ROOT_INO,
-                                                  "bar");
+            THEN("Lookup returns the new inode only") {
+                auto lookup_result = cache.lookup(Dragonstash::ROOT_INO,
+                                                  "entry");
                 REQUIRE(lookup_result);
-                CHECK(*lookup_result != *put_result);
+                CHECK(*lookup_result == *new_result);
             }
 
-            THEN("the attributes can be read back") {
-                REQUIRE(put_result);
+            THEN("The second entry is unharmed") {
+                auto lookup_result = cache.lookup(Dragonstash::ROOT_INO,
+                                                  "other");
+            }
+        }
+    }
+}
 
-                auto get_result = cache.GetAttr(*put_result);
-                REQUIRE(get_result);
-                CHECK(get_result->uid == info.uid);
-                CHECK(get_result->gid == info.gid);
-                CHECK(get_result->size == info.size);
+SCENARIO("Reverse lookup")
+{
+    TestSetup setup;
+    Dragonstash::Cache &cache = setup.cache();
+    Dragonstash::Backend::Stat attr{
+        .mode = S_IFDIR
+    };
+
+    GIVEN("An empty cache") {
+        WHEN("Looking up the name of the root inode") {
+            THEN("The name is empty") {
+                auto lookup_result = cache.name(Dragonstash::ROOT_INO);
+                REQUIRE(lookup_result);
+                CHECK(lookup_result->empty());
+            }
+        }
+
+        WHEN("Looking up the name of a non-existent inode") {
+            THEN("-ENOENT is returned") {
+                auto lookup_result = cache.name(nonexistent_inode);
+                CHECK(!lookup_result);
+                CHECK(lookup_result.error() == -ENOENT);
+            }
+        }
+    }
+
+    GIVEN("A directory with an entry") {
+        auto entry_result = cache.emplace(Dragonstash::ROOT_INO,
+                                          "entry",
+                                          attr);
+        REQUIRE(entry_result);
+        ino_t entry_ino = *entry_result;
+
+        WHEN("Looking up the name of the inode") {
+            auto lookup_result = cache.name(entry_ino);
+
+            THEN("The correct name is returned") {
+                REQUIRE(lookup_result);
+                CHECK(*lookup_result == "entry");
             }
         }
     }

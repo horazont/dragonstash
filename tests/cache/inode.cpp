@@ -1,6 +1,51 @@
 #include <catch.hpp>
 
+#include <sys/stat.h>
+
 #include "cache/inode.hpp"
+
+SCENARIO("Inode serialization") {
+    GIVEN("an Inode") {
+        Dragonstash::Inode node{
+            .parent = 0x1122334455667788,
+            .mode = S_IFDIR,
+            .size = 0x123456789abcdef0,
+            .nblocks = 0x223456789abcdef0,
+                    .uid = 0x12345678,
+                    .gid = 0x12345679,
+                    .atime = timespec{0x323456789abcdef0, 0x323456789abcdef1},
+                    .mtime = timespec{0x423456789abcdef0, 0x423456789abcdef1},
+                    .ctime = timespec{0x523456789abcdef0, 0x523456789abcdef1},
+        };
+        WHEN("serialized and deserialized") {
+            std::array<std::uint8_t, Dragonstash::Inode::serialized_size> buf{};
+            node.serialize(buf.data());
+            auto parse_result = Dragonstash::Inode::parse(buf.data(), buf.size());
+
+            THEN("parsing should succeed") {
+                CHECK(parse_result);
+                CHECK(parse_result.error() == 0);
+            }
+
+            THEN("the values should be identical") {
+                CHECK(parse_result.error() == 0);
+                REQUIRE(parse_result);
+                CHECK(parse_result->parent == node.parent);
+                CHECK(parse_result->mode == node.mode);
+                CHECK(parse_result->size == node.size);
+                CHECK(parse_result->nblocks == node.nblocks);
+                CHECK(parse_result->uid == node.uid);
+                CHECK(parse_result->gid == node.gid);
+                CHECK(parse_result->atime.tv_sec == node.atime.tv_sec);
+                CHECK(parse_result->atime.tv_nsec == node.atime.tv_nsec);
+                CHECK(parse_result->mtime.tv_sec == node.mtime.tv_sec);
+                CHECK(parse_result->mtime.tv_nsec == node.mtime.tv_nsec);
+                CHECK(parse_result->ctime.tv_sec == node.ctime.tv_sec);
+                CHECK(parse_result->ctime.tv_nsec == node.ctime.tv_nsec);
+            }
+        }
+    }
+}
 
 SCENARIO("Inode deserialization") {
     GIVEN("an invalid header") {
@@ -63,6 +108,7 @@ SCENARIO("Inode deserialization") {
         WHEN("the buffer contains a valid inode") {
             std::array<std::uint8_t, Dragonstash::Inode::serialized_size> buf{{
                     0x01,
+                    0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, // parent
                     0x11, 0x22, 0x33, 0x44, // mode
                     0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, // size
                     0x11, 0x21, 0x31, 0x41, 0x51, 0x61, 0x71, 0x81, // nblocks
@@ -79,6 +125,7 @@ SCENARIO("Inode deserialization") {
                 auto parse_result = Dragonstash::Inode::parse(buf.data(), buf.size());
                 CHECK(parse_result.error() == 0);
                 REQUIRE(parse_result);
+                CHECK(parse_result->parent == 0xf0debc9a78563412);
                 CHECK(parse_result->mode == 0x44332211);
                 CHECK(parse_result->size == 0x8070605040302010);
                 CHECK(parse_result->nblocks == 0x8171615141312111);

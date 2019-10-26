@@ -9,7 +9,13 @@
 
 namespace Dragonstash {
 
+using ino_t = std::uint64_t;
+
+static constexpr ino_t INVALID_INO = 0;
+static constexpr ino_t ROOT_INO = 1;
+
 struct Inode {
+    ino_t parent;
     std::uint32_t mode;
     std::uint64_t size;
     std::uint64_t nblocks;
@@ -21,6 +27,7 @@ struct Inode {
 
     static constexpr std::size_t serialized_size =
             sizeof(std::uint8_t) + /* version */
+            sizeof(parent) +
             sizeof(mode) +
             sizeof(size) +
             sizeof(nblocks) +
@@ -35,6 +42,7 @@ struct Inode {
 
     static Inode from_backend_stat(const Backend::Stat &data) {
         return Inode{
+            .parent = INVALID_INO,
             .mode = data.mode,
                     .size = data.size,
                     .nblocks = 0,

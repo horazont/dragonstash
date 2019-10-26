@@ -17,10 +17,6 @@ namespace Dragonstash {
 static constexpr std::size_t CACHE_PAGE_SIZE = 4096;
 static constexpr std::size_t CACHE_INODE_SIZE = CACHE_PAGE_SIZE / 16;
 
-using ino_t = std::uint64_t;
-
-static constexpr ino_t ROOT_INO = 1;
-
 enum DataPriority {
     READAHEAD = 0,
     REQUESTED = 1,
@@ -75,118 +71,238 @@ public:
 };
 
 
-class Cache {
+class CacheTransactionRO;
+class CacheTransactionRW;
+
+
+class CacheDatabase {
 public:
-    explicit Cache(const std::filesystem::path &db_path);
+    explicit CacheDatabase(std::shared_ptr<MDBEnv> env);
 
 private:
     std::shared_ptr<MDBEnv> m_env;
+    MDBDbi m_meta_db;
     MDBDbi m_inodes_db;
-    MDBDbi m_tree_db;
+    MDBDbi m_tree_inode_key_db;
+    MDBDbi m_tree_name_key_db;
 
-    Result<ino_t> lookup(MDBRWTransaction &transaction,
-                         ino_t parent,
-                         const char *name);
+    size_t m_max_name_length;
 
-    Result<std::unique_ptr<CachedDir>> openDir(MDBRWTransaction);
+    void validate_max_key_size();
+
+public:
+    [[nodiscard]] inline MDBEnv &env()
+    {
+        return *m_env;
+    }
+
+    [[nodiscard]] inline MDBDbi &meta_db()
+    {
+        return m_meta_db;
+    }
+
+    [[nodiscard]] inline MDBDbi &inodes_db()
+    {
+        return m_inodes_db;
+    }
+
+    [[nodiscard]] inline MDBDbi &tree_inode_key_db()
+    {
+        return m_tree_inode_key_db;
+    }
+
+    [[nodiscard]] inline MDBDbi &tree_name_key_db()
+    {
+        return m_tree_name_key_db;
+    }
+
+    [[nodiscard]] inline size_t max_name_length() const
+    {
+        return m_max_name_length;
+    }
+
+    [[nodiscard]] Result<void> check_name(std::string_view name, bool for_writing);
+
+};
+
+
+class Cache {
+public:
+    explicit Cache(const std::filesystem::path &db_path);
+    Cache(const Cache &src) = delete;
+    Cache(Cache &&src) = delete;
+    Cache &operator=(const Cache &src) = delete;
+    Cache &operator=(Cache &&src) = delete;
+    ~Cache() = default;
+
+private:
+    CacheDatabase m_db;
 
 public:
     /**
-     * @brief Store data associated with a file inode into the cache.
-     * @param ino
-     * @param data
-     * @param size
-     * @param offset
-     * @param prio
-     * @return
+     * @brief Get maximum length of directory entry names.
      */
-    Result<ssize_t> PutData(ino_t ino, const char *data, size_t size,
-                            off_t offset, DataPriority prio);
+    [[nodiscard]] inline size_t max_name_length() const
+    {
+        return m_db.max_name_length();
+    }
+
+    [[nodiscard]] CacheTransactionRO begin_ro();
+    [[nodiscard]] CacheTransactionRW begin_rw();
 
     /**
-     * @brief Load data from a file inode from the cache.
-     * @param ino
-     * @param out
-     * @param size
-     * @param offset
+     * @brief Look up the name of an inode
+     * @param ino Number of the inode
      * @return
      */
-    Result<ssize_t> FetchData(ino_t ino, char *out, size_t size, off_t offset);
+    [[nodiscard]] Result<std::string> name(ino_t ino);
 
     /**
-     * @brief Fetch the symlink destination of a link from the cache.
+     * @brief Look up the parent inode of an inode.
      * @param ino
      * @return
      */
-    Result<std::string> FetchLink(ino_t ino);
+    [[nodiscard]] Result<ino_t> parent(ino_t ino);
 
     /**
-     * @brief Store the symlink destination of a link in the cache.
+     * @brief Look up the inode number of an entry in a directory.
+     * @param parent The inode of the parent directory.
+     * @param name Name of the entry to look up.
+     * @return The inode number of the entry.
+     */
+    [[nodiscard]] Result<ino_t> lookup(ino_t parent, std::string_view name);
+
+    /**
+     * @brief Create or replace a directory entry.
+     * @param parent Inode of the directory to operate in.
+     * @param name Name of the directory entry.
+     * @param attrs Attributes of the new entry.
+     *
+     * If an entry with the same name exists already, the old one is replaced.
+     *
+     * @return The inode of the new entry.
+     */
+    Result<ino_t> emplace(ino_t parent, std::string_view name,
+                          const Backend::Stat &attrs);
+};
+
+
+class CacheTransactionRO {
+protected:
+    CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn);
+
+public:
+    CacheTransactionRO(const CacheTransactionRO &src) = delete;
+    CacheTransactionRO(CacheTransactionRO &&src) noexcept = default;
+    CacheTransactionRO &operator=(const CacheTransactionRO &src) = delete;
+    CacheTransactionRO &operator=(CacheTransactionRO &&src) noexcept = default;
+    ~CacheTransactionRO() = default;
+
+private:
+    CacheDatabase *m_db;
+    MDBROTransaction m_txn;
+
+protected:
+    [[nodiscard]] inline CacheDatabase &db() {
+        return *m_db;
+    }
+
+    [[nodiscard]] inline MDBROTransactionImpl *ro_transaction() {
+        return m_txn.get();
+    }
+
+public:
+    [[nodiscard]] inline Cache &cache();
+    [[nodiscard]] inline const Cache &cache() const;
+
+    /**
+     * @brief Look up the name of an inode in a directory
+     * @param parent Number of the parent inode
+     * @param ino Number of the inode
+     * @return
+     */
+    [[nodiscard]] Result<std::string> name(ino_t parent, ino_t ino);
+
+    /**
+     * @brief Look up the name of an inode
+     * @param ino Number of the inode
+     *
+     * This is a convenience wrapper which uses parent() and then name().
+     *
+     * @return
+     */
+    [[nodiscard]] Result<std::string> name(ino_t ino);
+
+    /**
+     * @brief Look up the parent inode of an inode.
      * @param ino
-     * @param dest
      * @return
      */
-    Result<void> PutLink(ino_t ino, const char *dest);
+    [[nodiscard]] Result<ino_t> parent(ino_t ino);
 
     /**
-     * @brief Update the attributes of an inode in the cache.
-     * @param ino
-     * @param data
-     *
-     * This may change the type of the inode. If the inode type changes, all
-     * data associated with the inode is discarded. In case of directory inodes,
-     * this means that all contained inodes will be deleted from the cache,
-     * including directories.
-     *
-     * @return
+     * @brief Look up the inode number of an entry in a directory.
+     * @param parent The inode of the parent directory.
+     * @param name Name of the entry to look up.
+     * @return The inode number of the entry.
      */
-    Result<void> PutAttr(ino_t ino, const Backend::Stat &data);
+    [[nodiscard]] Result<ino_t> lookup(ino_t parent, std::string_view name);
 
-    Result<ino_t> PutAttr(ino_t parent, const char *name, const Backend::Stat &data);
+    inline explicit operator bool() const {
+        return bool(m_txn);
+    }
+
+    void abort();
+    void commit();
+
+    friend class Cache;
+};
+
+class CacheTransactionRW: public CacheTransactionRO {
+protected:
+    CacheTransactionRW(CacheDatabase &cache, MDBRWTransaction &&txn);
+
+public:
+    CacheTransactionRW(const CacheTransactionRW &src) = delete;
+    CacheTransactionRW(CacheTransactionRW &&src) noexcept = default;
+    CacheTransactionRW &operator=(const CacheTransactionRW &src) = delete;
+    CacheTransactionRW &operator=(CacheTransactionRW &&src) noexcept = default;
+    ~CacheTransactionRW() = default;
+
+private:
+    [[nodiscard]] inline MDBRWTransactionImpl *rw_transaction() {
+        // static_cast is safe here, because the constructor of this class
+        // only accepts MDBRWTransaction objects.
+        return static_cast<MDBRWTransactionImpl*>(ro_transaction());
+    }
+
+    [[nodiscard]] ino_t allocate_next_inode();
+
+public:
+    [[nodiscard]] inline CacheTransactionRW begin_nested()
+    {
+        return CacheTransactionRW(db(), rw_transaction()->getRWTransaction());
+    }
+
+    [[nodiscard]] inline CacheTransactionRO begin_nested_ro()
+    {
+        return begin_nested();
+    }
+
+    friend class Cache;
 
     /**
-     * @brief Delete an inode and its data from the cache entirely.
-     * @param ino
+     * @brief Create or replace a directory entry.
+     * @param parent Inode of the directory to operate in.
+     * @param name Name of the directory entry.
+     * @param attrs Attributes of the new entry.
      *
-     * In case of directory inodes, this will also delete all contained inodes
-     * recursively.
+     * If an entry with the same name exists already, the old one is replaced.
      *
-     * @return
+     * @return The inode of the new entry.
      */
-    Result<void> Delete(ino_t ino);
-
-    /**
-     * @brief Find the inode number for a node starting at parent.
-     * @param parent Inode number of the parent; may be ROOT_INO to start at the
-     *   root.
-     * @param path
-     *
-     * @return
-     */
-    Result<ino_t> Lookup(ino_t parent, const char *path);
-
-    /**
-     * @brief GetAttr
-     * @param ino
-     * @return
-     */
-    Result<Inode> GetAttr(ino_t ino);
-
-    /**
-     * @brief Open a snapshot of a directory for reading.
-     * @param ino
-     *
-     * The stream will be consistent even if concurrent deletions/additions
-     * happen. It may return entries which have been deleted in the meantime.
-     *
-     * Instanced of CachedDir should not be kept beyond handling a single
-     * fuse callback, because only a limited number of them can co-exist at
-     * the same time.
-     *
-     * @return
-     */
-    Result<std::unique_ptr<CachedDir>> OpenDir(ino_t ino);
-
+    Result<ino_t> emplace(ino_t parent, std::string_view name,
+                          const Backend::Stat &attrs);
 };
 
 }
