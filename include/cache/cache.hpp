@@ -192,6 +192,40 @@ protected:
     CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn);
 
 public:
+    /**
+     * A group of functions which may be executed when the transaction commits.
+     */
+    struct CommitHook
+    {
+        /**
+         * @brief Executed on commit
+         *
+         * If the function returns a non-success result, all previously
+         * executed CommitHooks will have their pre_rollback function called and
+         * the transaction will abort instead of commit.
+         *
+         * The result is returned from the commit method.
+         */
+        std::function<Result<void>()> stage_1_commit;
+
+        /**
+         * @brief Executed when a later commit hook failed
+         *
+         * This is to allow a commit hook to roll back changes which it has
+         * prepared to commit if later commit hooks have failed.
+         */
+        std::function<void()> stage_1_rollback;
+
+        /**
+         * @brief Executed when all pre commit hooks have passed.
+         *
+         * This function must not fail, otherwise the results will be
+         * inconsistent.
+         */
+        std::function<void()> stage_2_commit;
+    };
+
+public:
     CacheTransactionRO(const CacheTransactionRO &src) = delete;
     CacheTransactionRO(CacheTransactionRO &&src) noexcept = default;
     CacheTransactionRO &operator=(const CacheTransactionRO &src) = delete;
@@ -201,6 +235,7 @@ public:
 private:
     CacheDatabase *m_db;
     MDBROTransaction m_txn;
+    std::vector<CommitHook> m_commit_hooks;
 
 protected:
     [[nodiscard]] inline CacheDatabase &db() {
@@ -211,10 +246,24 @@ protected:
         return m_txn.get();
     }
 
-public:
-    [[nodiscard]] inline Cache &cache();
-    [[nodiscard]] inline const Cache &cache() const;
+    inline void add_commit_hook(CommitHook &&src)
+    {
+        m_commit_hooks.emplace_back(std::move(src));
+    }
 
+    template <typename T1, typename T2, typename T3>
+    inline void add_commit_hook(T1 &&stage_1_commit,
+                                T2 &&stage_1_rollback,
+                                T3 &&stage_2_commit)
+    {
+        m_commit_hooks.emplace_back(CommitHook{
+                                        std::forward<T1>(stage_1_commit),
+                                        std::forward<T2>(stage_1_rollback),
+                                        std::forward<T3>(stage_2_commit),
+                                    });
+    }
+
+public:
     /**
      * @brief Look up the name of an inode in a directory
      * @param parent Number of the parent inode
@@ -253,7 +302,7 @@ public:
     }
 
     void abort();
-    void commit();
+    [[nodiscard]] Result<void> commit();
 
     friend class Cache;
 };

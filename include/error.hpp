@@ -101,6 +101,11 @@ public:
 
     }
 
+    Result(const Result &src) = default;
+    Result(Result &&src) = default;
+    Result &operator=(const Result &src) = default;
+    Result &operator=(Result &&src) = default;
+
     Result(ErrorResultHelper &&helper):
         m_ok(false),
         m_errno(helper.error)
@@ -116,8 +121,8 @@ public:
     }
 
 private:
-    const bool m_ok;
-    const int m_errno;
+    bool m_ok;
+    int m_errno;
 
 public:
     inline explicit operator bool() const {

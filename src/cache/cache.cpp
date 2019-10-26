@@ -25,7 +25,7 @@
 namespace Dragonstash {
 
 static const std::string_view DB_NAME_META = "meta";
-static const std::string_view DB_NAME_INODES = "inodess";
+static const std::string_view DB_NAME_INODES = "inodes";
 static const std::string_view DB_NAME_TREE_INODE_KEY = "treei";
 static const std::string_view DB_NAME_TREE_NAME_KEY = "treen";
 
@@ -249,7 +249,16 @@ Result<ino_t> Cache::emplace(ino_t parent, std::string_view name, const Backend:
 {
     auto txn = begin_rw();
     auto result = txn.emplace(parent, name, attrs);
-    txn.commit();
+    if (!result) {
+        txn.abort();
+        return result;
+    }
+    {
+        auto commit_result = txn.commit();
+        if (!commit_result) {
+            return make_result(FAILED, commit_result.error());
+        }
+    }
     return result;
 }
 
@@ -371,10 +380,45 @@ void CacheTransactionRO::abort()
     m_txn = nullptr;
 }
 
-void CacheTransactionRO::commit()
+Result<void> CacheTransactionRO::commit()
 {
+    if (!m_txn) {
+        return make_result();
+    }
+
+    Result<void> result;
+    auto iter = m_commit_hooks.begin();
+    for (; iter != m_commit_hooks.end(); ++iter) {
+        CommitHook &hook = *iter;
+        if (!hook.stage_1_commit) {
+            continue;
+        }
+        result = hook.stage_1_commit();
+        if (!result) {
+            // rollback!
+            --iter;
+            do {
+                CommitHook &rb_hook = *iter;
+                if (rb_hook.stage_1_rollback) {
+                    rb_hook.stage_1_rollback();
+                }
+            } while (iter != m_commit_hooks.end());
+            m_txn->abort();
+            return result;
+        }
+    }
+
+    // now all preparations have passed, we can go on and execute the commit
+    for (CommitHook &hook: m_commit_hooks) {
+        if (hook.stage_2_commit) {
+            hook.stage_2_commit();
+        }
+    }
+
     m_txn->commit();
+    m_commit_hooks.clear();
     m_txn = nullptr;
+    return make_result();
 }
 
 /* Dragonstash::CacheTransactionRW */
