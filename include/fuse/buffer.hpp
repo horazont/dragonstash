@@ -21,12 +21,12 @@ public:
     void add(Request &req,
              const char *name,
              const struct stat &stbuf,
-             const off_t off);
+             off_t off);
     void add(Request &req,
              const char *name,
              const struct stat &stbuf);
 
-    inline const std::basic_string<char> &get() const {
+    [[nodiscard]] inline const std::basic_string<char> &get() const {
         return m_buf;
     }
 };
@@ -40,21 +40,21 @@ private:
                        const char *name,
                        const fuse_entry_param &e);
     void execute_add(Request &req,
-                     const size_t old_size,
+                     size_t old_size,
                      const char *name,
                      const fuse_entry_param &e,
-                     const off_t off);
+                     off_t off);
 
 public:
     void add(Request &req,
              const char *name,
              const fuse_entry_param &e,
-             const off_t off);
+             off_t off);
     void add(Request &req,
              const char *name,
              const fuse_entry_param &e);
 
-    inline const std::basic_string<char> &get() const {
+    [[nodiscard]] inline const std::basic_string<char> &get() const {
         return m_buf;
     }
 };

@@ -62,6 +62,7 @@ target_link_libraries(dragonstash libdragonstash)
 
 set(TESTS_SRCS
     tests/main.cpp
+    tests/cache/cache.cpp
     tests/cache/inode.cpp)
 
 add_executable(dragonstash-tests ${TESTS_SRCS})

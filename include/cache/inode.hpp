@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <sys/types.h>
 
+#include "error.hpp"
 #include "backend.hpp"
 
 namespace Dragonstash {

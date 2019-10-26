@@ -8,7 +8,7 @@ size_t DirBuffer::prepare_add(Request &req, const char *name)
 {
     const size_t old_size = m_buf.size();
     const size_t new_size = old_size + fuse_add_direntry(*req, nullptr, 0,
-                                                         name, NULL, 0);
+                                                         name, nullptr, 0);
     m_buf.resize(new_size);
     return old_size;
 }

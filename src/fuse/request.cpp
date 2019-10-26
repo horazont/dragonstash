@@ -16,14 +16,14 @@ Request::Request(fuse_req_t req, int default_error):
 
 }
 
-Request::Request(Request &&src):
+Request::Request(Request &&src) noexcept:
     m_req(src.m_req),
     m_default_error(src.m_default_error)
 {
     src.m_req = nullptr;
 }
 
-Request &Request::operator=(Request &&src)
+Request &Request::operator=(Request &&src) noexcept
 {
     if (m_req) {
         reset();
@@ -34,7 +34,7 @@ Request &Request::operator=(Request &&src)
     return *this;
 }
 
-Request &Request::operator=(nullptr_t)
+Request &Request::operator=(std::nullptr_t)
 {
     if (m_req) {
         reset();

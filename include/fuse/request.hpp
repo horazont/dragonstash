@@ -17,10 +17,10 @@ public:
     Request();
     explicit Request(fuse_req_t req, int default_error = ECANCELED);
     Request(const Request &src) = delete;
-    Request(Request &&src);
+    Request(Request &&src) noexcept;
     Request &operator=(const Request &src) = delete;
-    Request &operator=(Request &&src);
-    Request &operator=(nullptr_t);
+    Request &operator=(Request &&src) noexcept;
+    Request &operator=(std::nullptr_t);
     ~Request();
 
 private:
@@ -55,7 +55,7 @@ public:
         other.m_req = tmp;
     }
 
-    inline const fuse_req_t operator*() const {
+    inline fuse_req_t operator*() const {
         return m_req;
     }
 
@@ -72,7 +72,7 @@ public: /* GETTERS */
         return fuse_req_ctx(m_req);
     }
 
-    inline int getgroups(int size, gid_t list[]) {
+    inline int getgroups(int size, gid_t *list) {
         return fuse_req_getgroups(m_req, size, list);
     }
 
