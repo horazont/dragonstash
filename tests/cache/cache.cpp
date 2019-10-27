@@ -9,6 +9,9 @@
 #include <fcntl.h>
 #include <cstring>
 #include <iostream>
+#include <unistd.h>
+#include <ctime>
+#include <chrono>
 
 #include "cache/cache.hpp"
 
@@ -134,7 +137,7 @@ SCENARIO("Inode cache behaviour")
 
     GIVEN("An empty cache and directory attributes") {
         Dragonstash::Cache &cache = setup.cache();
-        Dragonstash::Backend::Stat attr{
+        Dragonstash::InodeAttributes attr{
             .mode = S_IFDIR
         };
 
@@ -173,7 +176,7 @@ SCENARIO("Directory entry replacement")
 {
     TestSetup setup;
     Dragonstash::Cache &cache = setup.cache();
-    Dragonstash::Backend::Stat attr{
+    Dragonstash::InodeAttributes attr{
         .mode = S_IFDIR
     };
 
@@ -218,7 +221,7 @@ SCENARIO("Reverse lookup")
 {
     TestSetup setup;
     Dragonstash::Cache &cache = setup.cache();
-    Dragonstash::Backend::Stat attr{
+    Dragonstash::InodeAttributes attr{
         .mode = S_IFDIR
     };
 
@@ -253,6 +256,158 @@ SCENARIO("Reverse lookup")
             THEN("The correct name is returned") {
                 REQUIRE(lookup_result);
                 CHECK(*lookup_result == "entry");
+            }
+        }
+    }
+}
+
+SCENARIO("Attributes retrieval and storage")
+{
+    TestSetup setup;
+    Dragonstash::Cache &cache = setup.cache();
+
+    GIVEN("An empty cache") {
+        WHEN("Fetching the attributes of an nonexistent inode") {
+            auto getattr_result = cache.getattr(nonexistent_inode);
+
+            THEN("It returns -ENOENT") {
+                CHECK(!getattr_result);
+                CHECK(getattr_result.error() == -ENOENT);
+            }
+        }
+
+        WHEN("Fetching the attributes of the root inode") {
+            auto getattr_result = cache.getattr(Dragonstash::ROOT_INO);
+
+            THEN("It returns success") {
+                CHECK(getattr_result);
+                CHECK(getattr_result.error() == 0);
+            }
+
+            THEN("It is a directory") {
+                REQUIRE(getattr_result);
+                CHECK((getattr_result->mode & S_IFMT) == S_IFDIR);
+            }
+
+            THEN("Its UID and GID are the IDs of the current user") {
+                REQUIRE(getattr_result);
+                CHECK(getattr_result->uid == getuid());
+                CHECK(getattr_result->gid == getgid());
+            }
+
+            THEN("Its timestamps are close to now") {
+                REQUIRE(getattr_result);
+                auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                CHECK((now - getattr_result->atime.tv_sec) < 10);
+                CHECK((now - getattr_result->mtime.tv_sec) < 10);
+                CHECK((now - getattr_result->ctime.tv_sec) < 10);
+            }
+
+            THEN("Its size is zero") {
+                REQUIRE(getattr_result);
+                CHECK(getattr_result->size == 0);
+                CHECK(getattr_result->nblocks == 0);
+            }
+        }
+    }
+
+    Dragonstash::InodeAttributes attr{
+        .mode = S_IFDIR
+    };
+
+    GIVEN("A cache with a single additional directory entry") {
+        auto emplace_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr);
+        CHECK(emplace_result.error() == 0);
+        REQUIRE(emplace_result);
+
+        WHEN("Requesting attributes of that entry") {
+            auto getattr_result = cache.getattr(*emplace_result);
+            CHECK(getattr_result.error() == 0);
+            REQUIRE(getattr_result);
+
+            THEN("The attributes from emplace have been preserved") {
+                CHECK(getattr_result->mode == attr.mode);
+                CHECK(getattr_result->gid == attr.gid);
+                CHECK(getattr_result->uid == attr.uid);
+                CHECK(getattr_result->size == attr.size);
+                CHECK(getattr_result->nblocks == attr.nblocks);
+                CHECK(getattr_result->atime.tv_sec == attr.atime.tv_sec);
+                CHECK(getattr_result->atime.tv_nsec == attr.atime.tv_nsec);
+                CHECK(getattr_result->mtime.tv_sec == attr.mtime.tv_sec);
+                CHECK(getattr_result->mtime.tv_nsec == attr.mtime.tv_nsec);
+                CHECK(getattr_result->ctime.tv_sec == attr.ctime.tv_sec);
+                CHECK(getattr_result->ctime.tv_nsec == attr.ctime.tv_nsec);
+            }
+
+            THEN("The inode number in the result matches") {
+                CHECK(getattr_result->ino == *emplace_result);
+            }
+        }
+
+        WHEN("Replacing the directory entry") {
+            Dragonstash::InodeAttributes attr2{
+                .mode = S_IFREG,
+            };
+            auto emplace2_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+            CHECK(emplace2_result.error() == 0);
+            REQUIRE(emplace2_result);
+            CHECK(*emplace2_result != *emplace_result);
+
+            THEN("Calling getattr on the old entry fails with -ENOENT") {
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(!getattr_result);
+                CHECK(getattr_result.error() == -ENOENT);
+            }
+
+            THEN("Calling getattr on the new entry succeeds") {
+                auto getattr_result = cache.getattr(*emplace2_result);
+                CHECK(getattr_result.error() == 0);
+                REQUIRE(getattr_result);
+                CHECK(getattr_result->mode == attr2.mode);
+                CHECK(getattr_result->gid == attr2.gid);
+                CHECK(getattr_result->uid == attr2.uid);
+                CHECK(getattr_result->size == attr2.size);
+                CHECK(getattr_result->nblocks == attr2.nblocks);
+                CHECK(getattr_result->atime.tv_sec == attr2.atime.tv_sec);
+                CHECK(getattr_result->atime.tv_nsec == attr2.atime.tv_nsec);
+                CHECK(getattr_result->mtime.tv_sec == attr2.mtime.tv_sec);
+                CHECK(getattr_result->mtime.tv_nsec == attr2.mtime.tv_nsec);
+                CHECK(getattr_result->ctime.tv_sec == attr2.ctime.tv_sec);
+                CHECK(getattr_result->ctime.tv_nsec == attr2.ctime.tv_nsec);
+            }
+        }
+    }
+}
+
+SCENARIO("Locked inodes should not be removed when replaced")
+{
+    GIVEN("A cache with an entry") {
+        TestSetup setup;
+        Dragonstash::Cache &cache = setup.cache();
+        Dragonstash::InodeAttributes attr{
+            .mode = S_IFDIR
+        };
+        auto emplace_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr);
+        CHECK(emplace_result.error() == 0);
+        REQUIRE(emplace_result);
+
+        WHEN("An inode is locked") {
+            auto lock_result = cache.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            REQUIRE(lock_result);
+
+            THEN("The inode is not removed when the entry is replaced") {
+                Dragonstash::InodeAttributes attr2{
+                    .mode = S_IFREG
+                };
+                auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+                CHECK(override_result.error() == 0);
+                REQUIRE(override_result);
+                CHECK(*override_result != *emplace_result);
+
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == 0);
+                CHECK(getattr_result);
             }
         }
     }

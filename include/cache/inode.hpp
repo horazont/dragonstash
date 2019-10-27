@@ -14,9 +14,7 @@ using ino_t = std::uint64_t;
 static constexpr ino_t INVALID_INO = 0;
 static constexpr ino_t ROOT_INO = 1;
 
-struct Inode {
-    ino_t parent;
-    std::uint32_t mode;
+struct CommonFileAttributes {
     std::uint64_t size;
     std::uint64_t nblocks;
     std::uint32_t uid;
@@ -24,6 +22,23 @@ struct Inode {
     struct timespec atime;
     struct timespec mtime;
     struct timespec ctime;
+};
+
+struct InodeAttributes: public CommonFileAttributes {
+    std::uint32_t mode;
+};
+
+struct Stat: public InodeAttributes {
+    ino_t ino;
+};
+
+struct DirectoryEntry: public Stat {
+    std::string name;
+    bool complete;
+};
+
+struct Inode: public InodeAttributes {
+    ino_t parent;
 
     static constexpr std::size_t serialized_size =
             sizeof(std::uint8_t) + /* version */
@@ -42,8 +57,8 @@ struct Inode {
 
     static Inode from_backend_stat(const Backend::Stat &data) {
         return Inode{
-            .parent = INVALID_INO,
-            .mode = data.mode,
+            InodeAttributes{
+                CommonFileAttributes{
                     .size = data.size,
                     .nblocks = 0,
                     .uid = data.uid,
@@ -51,6 +66,10 @@ struct Inode {
                     .atime = timespec{data.atime.tv_sec, data.atime.tv_nsec},
                     .mtime = timespec{data.mtime.tv_sec, data.mtime.tv_nsec},
                     .ctime = timespec{data.ctime.tv_sec, data.ctime.tv_nsec},
+                },
+                .mode = data.mode,
+            },
+            .parent = INVALID_INO,
         };
     }
 

@@ -7,15 +7,19 @@
 SCENARIO("Inode serialization") {
     GIVEN("an Inode") {
         Dragonstash::Inode node{
-            .parent = 0x1122334455667788,
-            .mode = S_IFDIR,
-            .size = 0x123456789abcdef0,
-            .nblocks = 0x223456789abcdef0,
+            Dragonstash::InodeAttributes{
+                Dragonstash::CommonFileAttributes{
+                    .size = 0x123456789abcdef0,
+                    .nblocks = 0x223456789abcdef0,
                     .uid = 0x12345678,
                     .gid = 0x12345679,
                     .atime = timespec{0x323456789abcdef0, 0x323456789abcdef1},
                     .mtime = timespec{0x423456789abcdef0, 0x423456789abcdef1},
                     .ctime = timespec{0x523456789abcdef0, 0x523456789abcdef1},
+                },
+                .mode = S_IFDIR,
+            },
+            .parent = 0x1122334455667788,
         };
         WHEN("serialized and deserialized") {
             std::array<std::uint8_t, Dragonstash::Inode::serialized_size> buf{};

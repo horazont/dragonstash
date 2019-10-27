@@ -23,12 +23,6 @@ enum DataPriority {
     WRITTEN = 2,
 };
 
-struct DirEntry {
-    std::string name;
-    std::uint64_t ino;
-    std::uint32_t mode;
-};
-
 class CachedDir {
 public:
     explicit CachedDir(MDBROTransaction &&transaction,
@@ -38,6 +32,7 @@ public:
     CachedDir(CachedDir &&src) noexcept;
     CachedDir &operator=(const CachedDir &src) = delete;
     CachedDir &operator=(CachedDir &&src) noexcept;
+    ~CachedDir() = default;
 
 private:
     MDBROTransaction m_transaction;
@@ -49,8 +44,8 @@ private:
 
     void mark_eof();
 
-    Result<DirEntry> parse_entry(const char *buf, size_t sz);
-    Result<DirEntry> parse_entry_v1(const char *buf, size_t sz);
+    Result<DirectoryEntry> parse_entry(const char *buf, size_t sz);
+    Result<DirectoryEntry> parse_entry_v1(const char *buf, size_t sz);
 
 public:
     /**
@@ -58,7 +53,7 @@ public:
      *
      * @return The directory entry and its offset.
      */
-    Result<std::tuple<DirEntry, off_t>> ReadDir();
+    Result<std::tuple<DirectoryEntry, off_t>> ReadDir();
 
     /**
      * @brief Set the cursor position to a specific offset.
@@ -172,6 +167,10 @@ public:
      */
     [[nodiscard]] Result<ino_t> lookup(ino_t parent, std::string_view name);
 
+    [[nodiscard]] Result<Stat> getattr(ino_t ino);
+
+    [[nodiscard]] Result<void> setattr(ino_t ino, const Stat &attrs);
+
     /**
      * @brief Create or replace a directory entry.
      * @param parent Inode of the directory to operate in.
@@ -182,8 +181,8 @@ public:
      *
      * @return The inode of the new entry.
      */
-    Result<ino_t> emplace(ino_t parent, std::string_view name,
-                          const Backend::Stat &attrs);
+    [[nodiscard]] Result<ino_t> emplace(ino_t parent, std::string_view name,
+                          const InodeAttributes &attrs);
 };
 
 
@@ -297,6 +296,8 @@ public:
      */
     [[nodiscard]] Result<ino_t> lookup(ino_t parent, std::string_view name);
 
+    [[nodiscard]] Result<Stat> getattr(ino_t ino);
+
     inline explicit operator bool() const {
         return bool(m_txn);
     }
@@ -350,8 +351,14 @@ public:
      *
      * @return The inode of the new entry.
      */
-    Result<ino_t> emplace(ino_t parent, std::string_view name,
-                          const Backend::Stat &attrs);
+    [[nodiscard]] Result<ino_t> emplace(ino_t parent, std::string_view name,
+                          const InodeAttributes &attrs);
+
+    [[nodiscard]] Result<void> unlink(ino_t ino);
+    [[nodiscard]] Result<void> unlink(ino_t parent, ino_t child);
+    [[nodiscard]] Result<void> unlink(ino_t parent, std::string_view name);
+
+    [[nodiscard]] Result<void> setattr(ino_t ino, const CommonFileAttributes &attrs);
 };
 
 }

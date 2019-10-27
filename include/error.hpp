@@ -147,6 +147,12 @@ inline ErrorResultHelper make_result(failed_t, int err)
     return ErrorResultHelper{err};
 }
 
+template<typename T>
+inline ErrorResultHelper copy_error(const Result<T> &result)
+{
+    return ErrorResultHelper{result.error()};
+}
+
 inline Result<void> make_result()
 {
     return Result<void>();
