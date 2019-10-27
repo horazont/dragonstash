@@ -33,6 +33,19 @@ static const std::string_view DB_NAME_TREE_NAME_KEY = "treen";
 
 static const std::string_view META_KEY_NEXT_INO = "next_ino";
 
+template<typename T, typename _ = typename std::enable_if<std::is_arithmetic<T>::value && std::numeric_limits<T>::min() == 0>::type>
+T safe_dec(T &value, T by = 1)
+{
+    if (by <= 0) {
+        return value;
+    }
+    if (value < by) {
+        throw std::runtime_error("attempt to decrease counter below zero");
+    }
+    value -= by;
+    return value;
+}
+
 
 CachedDir::CachedDir(MDBROTransaction &&transaction,
                      MDBROCursor &&cursor,
@@ -298,6 +311,20 @@ Result<ino_t> Cache::emplace(ino_t parent, std::string_view name, const InodeAtt
     });
 }
 
+Result<void> Cache::lock(ino_t ino)
+{
+    return with_rw_txn(begin_rw(), [ino](CacheTransactionRW &txn){
+        return txn.lock(ino);
+    });
+}
+
+Result<void> Cache::release(ino_t ino)
+{
+    return with_rw_txn(begin_rw(), [ino](CacheTransactionRW &txn){
+        return txn.release(ino);
+    });
+}
+
 /* Dragonstash::CacheTransactionRO */
 
 CacheTransactionRO::CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn):
@@ -309,7 +336,7 @@ CacheTransactionRO::CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn
 
 Result<std::string> CacheTransactionRO::name(ino_t parent, ino_t ino)
 {
-    if (ino == ROOT_INO) {
+    if (ino == ROOT_INO || parent == INVALID_INO) {
         return make_result(std::string_view(""));
     }
 
@@ -341,6 +368,9 @@ Result<std::string> CacheTransactionRO::name(ino_t ino)
     auto parent_result = parent(ino);
     if (!parent_result) {
         return make_result(FAILED, parent_result.error());
+    }
+    if (*parent_result == INVALID_INO) {
+        return "";
     }
     return name(*parent_result, ino);
 }
@@ -431,6 +461,11 @@ Result<Stat> CacheTransactionRO::getattr(ino_t ino)
 
 void CacheTransactionRO::abort()
 {
+    for (CommitHook &hook: m_commit_hooks) {
+        if (hook.rollback) {
+            hook.rollback();
+        }
+    }
     m_txn->abort();
     m_txn = nullptr;
 }
@@ -458,7 +493,7 @@ Result<void> CacheTransactionRO::commit()
                     rb_hook.stage_1_rollback();
                 }
             } while (iter != m_commit_hooks.end());
-            m_txn->abort();
+            abort();
             return result;
         }
     }
@@ -515,7 +550,6 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
     ino_t ino = allocate_next_inode();
 
     // Check if inode exists and unlink if needed
-    // TODO: do not unlink if an in-memory reference is kept.
     // TODO: unlink recursively if inode is a directory
     // TOOD: remove data if non-directory
     // TODO: move to orphan list instead and allow cleanup in separate threads
@@ -530,13 +564,31 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         MDBOutVal value_out{};
         if (name_cursor.find(key, key_out, value_out) != MDB_NOTFOUND) {
             const auto old_ino = value_out.get<ino_t>();
+            auto guard = db().in_memory_lock_guard();
             name_cursor.del();
 
             // re-use the key to construct the key for the other databases
             key.resize(sizeof(ino_t)*2);
             memcpy(&key[sizeof(ino_t)], &old_ino, sizeof(ino_t));
             rw_transaction()->del(db().tree_inode_key_db(), key);
-            rw_transaction()->del(db().inodes_db(), old_ino);
+            /* check if inode is locked via in-memory lock */
+            if (db().in_memory_locks()[old_ino] <= 0) {
+                rw_transaction()->del(db().inodes_db(), old_ino);
+            } else {
+                // we still have to set the parent to zero
+                auto cursor = rw_transaction()->getCursor(db().inodes_db());
+                if (cursor.find(old_ino, key_out, value_out) == 0) {
+                    auto old_inode = Inode::parse(reinterpret_cast<std::uint8_t*>(value_out.d_mdbval.mv_data),
+                                                  value_out.d_mdbval.mv_size);
+                    if (old_inode) {
+                        old_inode->parent = 0;
+                        std::string value_buf;
+                        value_buf.resize(Inode::serialized_size);
+                        old_inode->serialize(reinterpret_cast<std::uint8_t*>(value_buf.data()));
+                        cursor.put(key_out, value_buf);
+                    }
+                }
+            }
         }
     }
 
@@ -570,6 +622,62 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
     }
 
     return ino;
+}
+
+Result<void> CacheTransactionRW::lock(ino_t ino)
+{
+    {
+        auto guard = db().in_memory_lock_guard();
+        db().in_memory_locks()[ino] += 1;
+    }
+
+    add_commit_hook(nullptr, nullptr, nullptr, [this, ino](){
+        auto guard = db().in_memory_lock_guard();
+        safe_dec(db().in_memory_locks()[ino]);
+    });
+    return make_result();
+}
+
+Result<void> CacheTransactionRW::release(ino_t ino)
+{
+    bool cleared;
+    {
+        auto guard = db().in_memory_lock_guard();
+        cleared = safe_dec(db().in_memory_locks()[ino]) == 0;
+    }
+    add_commit_hook(nullptr, nullptr, nullptr, [this, ino](){
+        auto guard = db().in_memory_lock_guard();
+        db().in_memory_locks()[ino] += 1;
+    });
+
+    if (!cleared) {
+        return make_result();
+    }
+
+    // inode may have been orphaned, check for deletion
+    auto inode_cursor = rw_transaction()->getRWCursor(db().inodes_db());
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+    if (inode_cursor.find(ino, key_out, value_out) == MDB_NOTFOUND) {
+        // this does not automatically roll back the transaction though...
+        return make_result(FAILED, -ENOENT);
+    }
+
+    auto inode = Inode::parse(reinterpret_cast<std::uint8_t*>(value_out.d_mdbval.mv_data),
+                              value_out.d_mdbval.mv_size);
+    if (!inode) {
+        return copy_error(inode);
+    }
+
+    if (inode->parent == INVALID_INO) {
+        // orphaned inode
+        // TODO: clean up related data; since it's orphaned, it doesn't have
+        // any directory entries anymore, but blocks and link data may still
+        // exist.
+        inode_cursor.del();
+    }
+
+    return make_result();
 }
 
 }

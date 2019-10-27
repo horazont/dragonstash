@@ -4,6 +4,7 @@
 #include <sys/types.h>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 
 #include "error.hpp"
 
@@ -83,6 +84,9 @@ private:
 
     size_t m_max_name_length;
 
+    std::mutex m_in_memory_lock_mutex;
+    std::unordered_map<ino_t, std::uint64_t> m_in_memory_locks;
+
     void validate_max_key_size();
 
 public:
@@ -117,6 +121,14 @@ public:
     }
 
     [[nodiscard]] Result<void> check_name(std::string_view name, bool for_writing);
+
+    [[nodiscard]] inline std::lock_guard<std::mutex> in_memory_lock_guard() {
+        return std::lock_guard<std::mutex>(m_in_memory_lock_mutex);
+    }
+
+    [[nodiscard]] inline std::unordered_map<ino_t, std::uint64_t> &in_memory_locks() {
+        return m_in_memory_locks;
+    }
 
 };
 
@@ -183,6 +195,21 @@ public:
      */
     [[nodiscard]] Result<ino_t> emplace(ino_t parent, std::string_view name,
                           const InodeAttributes &attrs);
+
+    /**
+     * @brief Increase the lock counter on an inode
+     * @param ino Affected inode
+     *
+     * An inode with a lock counter greater than zero cannot be removed from
+     * the cache. The inode can be removed from the directory structure (and
+     * thus become orphaned), but it will stay in the storage until the lock
+     * count has reduced to zero.
+     *
+     * Lock counters are not persisted to disk.
+     */
+    [[nodiscard]] Result<void> lock(ino_t ino);
+
+    [[nodiscard]] Result<void> release(ino_t ino);
 };
 
 
@@ -192,7 +219,8 @@ protected:
 
 public:
     /**
-     * A group of functions which may be executed when the transaction commits.
+     * A group of functions which may be executed when the transaction commits
+     * or aborts.
      */
     struct CommitHook
     {
@@ -222,6 +250,11 @@ public:
          * inconsistent.
          */
         std::function<void()> stage_2_commit;
+
+        /**
+         * @brief Executed when the transaction is rolled back.
+         */
+        std::function<void()> rollback;
     };
 
 public:
@@ -250,15 +283,17 @@ protected:
         m_commit_hooks.emplace_back(std::move(src));
     }
 
-    template <typename T1, typename T2, typename T3>
+    template <typename T1, typename T2, typename T3, typename T4>
     inline void add_commit_hook(T1 &&stage_1_commit,
                                 T2 &&stage_1_rollback,
-                                T3 &&stage_2_commit)
+                                T3 &&stage_2_commit,
+                                T4 &&rollback)
     {
         m_commit_hooks.emplace_back(CommitHook{
                                         std::forward<T1>(stage_1_commit),
                                         std::forward<T2>(stage_1_rollback),
                                         std::forward<T3>(stage_2_commit),
+                                        std::forward<T4>(rollback),
                                     });
     }
 
@@ -352,13 +387,17 @@ public:
      * @return The inode of the new entry.
      */
     [[nodiscard]] Result<ino_t> emplace(ino_t parent, std::string_view name,
-                          const InodeAttributes &attrs);
+                                        const InodeAttributes &attrs);
 
     [[nodiscard]] Result<void> unlink(ino_t ino);
     [[nodiscard]] Result<void> unlink(ino_t parent, ino_t child);
     [[nodiscard]] Result<void> unlink(ino_t parent, std::string_view name);
 
     [[nodiscard]] Result<void> setattr(ino_t ino, const CommonFileAttributes &attrs);
+
+    [[nodiscard]] Result<void> lock(ino_t ino);
+
+    [[nodiscard]] Result<void> release(ino_t ino);
 };
 
 }

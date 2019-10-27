@@ -379,7 +379,7 @@ SCENARIO("Attributes retrieval and storage")
     }
 }
 
-SCENARIO("Locked inodes should not be removed when replaced")
+SCENARIO("Locked inodes")
 {
     GIVEN("A cache with an entry") {
         TestSetup setup;
@@ -405,6 +405,195 @@ SCENARIO("Locked inodes should not be removed when replaced")
                 REQUIRE(override_result);
                 CHECK(*override_result != *emplace_result);
 
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == 0);
+                CHECK(getattr_result);
+            }
+
+            THEN("The inode has the invalid inode as parent") {
+                Dragonstash::InodeAttributes attr2{
+                    .mode = S_IFREG
+                };
+                auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+                CHECK(override_result.error() == 0);
+                CHECK(override_result);
+
+                auto parent_result = cache.parent(*emplace_result);
+                CHECK(parent_result.error() == 0);
+                CHECK(parent_result);
+                CHECK(*parent_result == Dragonstash::INVALID_INO);
+            }
+
+            THEN("The inode has no name anymore") {
+                Dragonstash::InodeAttributes attr2{
+                    .mode = S_IFREG
+                };
+                auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+                CHECK(override_result.error() == 0);
+                CHECK(override_result);
+
+                auto name_result = cache.name(*emplace_result);
+                CHECK(name_result.error() == 0);
+                REQUIRE(name_result);
+                CHECK(name_result->empty());
+            }
+        }
+
+        WHEN("An inode is locked in the same transaction as its removal") {
+            auto txn = cache.begin_rw();
+            auto lock_result = txn.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            CHECK(lock_result);
+
+            THEN("The inode is not removed") {
+                Dragonstash::InodeAttributes attr2{
+                    .mode = S_IFREG
+                };
+                auto override_result = txn.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+                CHECK(override_result.error() == 0);
+                REQUIRE(override_result);
+                CHECK(*override_result != *emplace_result);
+
+                CHECK(txn.commit());
+
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == 0);
+                CHECK(getattr_result);
+            }
+        }
+
+        WHEN("A lock is rolled back") {
+            auto txn = cache.begin_rw();
+            auto lock_result = txn.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            CHECK(lock_result);
+            txn.abort();
+
+            THEN("The inode is removed when it is replaced") {
+                Dragonstash::InodeAttributes attr2{
+                    .mode = S_IFREG
+                };
+                auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+                CHECK(override_result.error() == 0);
+                REQUIRE(override_result);
+                CHECK(*override_result != *emplace_result);
+
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == -ENOENT);
+                CHECK(!getattr_result);
+            }
+        }
+
+        WHEN("A removed, locked inode is unlocked") {
+            auto lock_result = cache.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            REQUIRE(lock_result);
+
+            Dragonstash::InodeAttributes attr2{
+                .mode = S_IFREG
+            };
+            auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+            CHECK(override_result.error() == 0);
+            REQUIRE(override_result);
+            CHECK(*override_result != *emplace_result);
+
+            auto release_result = cache.release(*emplace_result);
+            CHECK(release_result.error() == 0);
+            REQUIRE(release_result);
+
+            THEN("The inode should be removed") {
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == -ENOENT);
+                CHECK(!getattr_result);
+            }
+        }
+
+        WHEN("A removed, locked inode is unlocked and the transaction is aborted") {
+            auto lock_result = cache.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            REQUIRE(lock_result);
+
+            Dragonstash::InodeAttributes attr2{
+                .mode = S_IFREG
+            };
+            auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+            CHECK(override_result.error() == 0);
+            REQUIRE(override_result);
+            CHECK(*override_result != *emplace_result);
+
+            auto txn = cache.begin_rw();
+            auto release_result = txn.release(*emplace_result);
+            CHECK(release_result.error() == 0);
+            REQUIRE(release_result);
+            txn.abort();
+
+            THEN("The inode should still exist") {
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == 0);
+                CHECK(getattr_result);
+            }
+        }
+
+        WHEN("A locked inode is unlocked but not removed") {
+            auto lock_result = cache.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            REQUIRE(lock_result);
+
+            auto release_result = cache.release(*emplace_result);
+            CHECK(release_result.error() == 0);
+            REQUIRE(release_result);
+
+            THEN("The inode should still exist") {
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == 0);
+                CHECK(getattr_result);
+            }
+        }
+
+        WHEN("A locked inode is unlocked and then replaced") {
+            auto lock_result = cache.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            REQUIRE(lock_result);
+
+            auto release_result = cache.release(*emplace_result);
+            CHECK(release_result.error() == 0);
+            REQUIRE(release_result);
+
+            Dragonstash::InodeAttributes attr2{
+                .mode = S_IFREG
+            };
+            auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+            CHECK(override_result.error() == 0);
+            REQUIRE(override_result);
+            CHECK(*override_result != *emplace_result);
+
+            THEN("The inode should be removed") {
+                auto getattr_result = cache.getattr(*emplace_result);
+                CHECK(getattr_result.error() == -ENOENT);
+                CHECK(!getattr_result);
+            }
+        }
+
+        WHEN("A locked inode is unlocked, but rolled back, and then replaced") {
+            auto lock_result = cache.lock(*emplace_result);
+            CHECK(lock_result.error() == 0);
+            REQUIRE(lock_result);
+
+            auto txn = cache.begin_rw();
+            auto release_result = txn.release(*emplace_result);
+            CHECK(release_result.error() == 0);
+            REQUIRE(release_result);
+            txn.abort();
+
+            Dragonstash::InodeAttributes attr2{
+                .mode = S_IFREG
+            };
+            auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+            CHECK(override_result.error() == 0);
+            REQUIRE(override_result);
+            CHECK(*override_result != *emplace_result);
+
+            THEN("The inode should still exist") {
                 auto getattr_result = cache.getattr(*emplace_result);
                 CHECK(getattr_result.error() == 0);
                 CHECK(getattr_result);

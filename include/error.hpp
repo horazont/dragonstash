@@ -69,7 +69,7 @@ public:
         return m_value.has_value();
     }
 
-    inline int error() const {
+    [[nodiscard]] inline int error() const {
         return m_errno;
     }
 
@@ -77,12 +77,16 @@ public:
         return &m_value.value();
     }
 
+    inline T &operator*() {
+        return m_value.value();
+    }
+
     inline const T &operator*() const {
         return m_value.value();
     }
 
-    inline T &operator*() {
-        return m_value.value();
+    inline T *operator->() {
+        return &m_value.value();
     }
 
     inline const T *operator->() const {
