@@ -159,7 +159,7 @@ private:
     }
 
     static void write(fuse_req_t req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi) {
-        dragonstash_fuse_dispatch(write, ino, buf, size, off, fi);
+        dragonstash_fuse_dispatch(write, ino, std::string_view(buf, size), off, fi);
     }
 
     static void flush(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi) {
@@ -195,7 +195,7 @@ private:
     }
 
     static void setxattr(fuse_req_t req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags) {
-        dragonstash_fuse_dispatch(setxattr, ino, name, value, size, flags);
+        dragonstash_fuse_dispatch(setxattr, ino, name, std::string_view(value, size), flags);
     }
 
     static void getxattr(fuse_req_t req, fuse_ino_t ino, const char *name, size_t size) {
@@ -299,21 +299,21 @@ class Interface {
 public:
     void init(struct fuse_conn_info *conn);
     void destroy();
-    void lookup(Fuse::Request &&req, fuse_ino_t parent, const char *name);
+    void lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view name);
     void forget(Fuse::Request &&req, fuse_ino_t ino, uint64_t nlookup);
     void getattr(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
     void setattr(Fuse::Request &&req, fuse_ino_t ino, struct stat &attr, int to_set, struct fuse_file_info *fi);
     void readlink(Fuse::Request &&req, fuse_ino_t ino);
-    void mknod(Fuse::Request &&req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev);
-    void mkdir(Fuse::Request &&req, fuse_ino_t parent, const char *name, mode_t mode);
-    void unlink(Fuse::Request &&req, fuse_ino_t parent, const char *name);
-    void rmdir(Fuse::Request &&req, fuse_ino_t parent, const char *name);
-    void symlink(Fuse::Request &&req, const char *link, fuse_ino_t parent, const char *name);
-    void rename(Fuse::Request &&req, fuse_ino_t parent, const char *name, fuse_ino_t newparent, const char *newname, unsigned int flags);
-    void link(Fuse::Request &&req, fuse_ino_t ino, fuse_ino_t newparent, const char *name);
+    void mknod(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, mode_t mode, dev_t rdev);
+    void mkdir(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, mode_t mode);
+    void unlink(Fuse::Request &&req, fuse_ino_t parent, std::string_view name);
+    void rmdir(Fuse::Request &&req, fuse_ino_t parent, std::string_view name);
+    void symlink(Fuse::Request &&req, const char *link, fuse_ino_t parent, std::string_view name);
+    void rename(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, fuse_ino_t newparent, std::string_view newname, unsigned int flags);
+    void link(Fuse::Request &&req, fuse_ino_t ino, fuse_ino_t newparent, std::string_view name);
     void open(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
     void read(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi);
-    void write(Fuse::Request &&req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi);
+    void write(Fuse::Request &&req, fuse_ino_t ino, std::string_view buf, off_t off, struct fuse_file_info *fi);
     void flush(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
     void release(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
     void fsync(Fuse::Request &&req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
@@ -322,12 +322,12 @@ public:
     void releasedir(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
     void fsyncdir(Fuse::Request &&req, fuse_ino_t ino, int datasync, struct fuse_file_info *fi);
     void statfs(Fuse::Request &&req, fuse_ino_t ino);
-    void setxattr(Fuse::Request &&req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags);
-    void getxattr(Fuse::Request &&req, fuse_ino_t ino, const char *name, size_t size);
+    void setxattr(Fuse::Request &&req, fuse_ino_t ino, std::string_view name, std::string_view value, int flags);
+    void getxattr(Fuse::Request &&req, fuse_ino_t ino, std::string_view name, size_t size);
     void listxattr(Fuse::Request &&req, fuse_ino_t ino, size_t size);
-    void removexattr(Fuse::Request &&req, fuse_ino_t ino, const char *name);
+    void removexattr(Fuse::Request &&req, fuse_ino_t ino, std::string_view name);
     void access(Fuse::Request &&req, fuse_ino_t ino, int mask);
-    void create(Fuse::Request &&req, fuse_ino_t parent, const char *name, mode_t mode, struct fuse_file_info *fi);
+    void create(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, mode_t mode, struct fuse_file_info *fi);
     void getlk(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi, struct flock *lock);
     void setlk(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi, struct flock *lock, int sleep);
     void bmap(Fuse::Request &&req, fuse_ino_t ino, size_t blocksize, uint64_t idx);

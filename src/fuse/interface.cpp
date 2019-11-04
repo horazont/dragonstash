@@ -16,7 +16,7 @@ void Interface::destroy()
  * sed -r 's/\s+void (\w+)\([^)]+)\);/void FuseInterface::\1(\2) {\n    req.reply_err(ENOSYS);\n}\n/' < calls
  */
 
-void Interface::lookup(Fuse::Request &&req, fuse_ino_t parent, const char *name) {
+void Interface::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view name) {
     req.reply_err(ENOSYS);
 }
 
@@ -36,31 +36,31 @@ void Interface::readlink(Fuse::Request &&req, fuse_ino_t ino) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::mknod(Fuse::Request &&req, fuse_ino_t parent, const char *name, mode_t mode, dev_t rdev) {
+void Interface::mknod(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, mode_t mode, dev_t rdev) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::mkdir(Fuse::Request &&req, fuse_ino_t parent, const char *name, mode_t mode) {
+void Interface::mkdir(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, mode_t mode) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::unlink(Fuse::Request &&req, fuse_ino_t parent, const char *name) {
+void Interface::unlink(Fuse::Request &&req, fuse_ino_t parent, std::string_view name) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::rmdir(Fuse::Request &&req, fuse_ino_t parent, const char *name) {
+void Interface::rmdir(Fuse::Request &&req, fuse_ino_t parent, std::string_view name) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::symlink(Fuse::Request &&req, const char *link, fuse_ino_t parent, const char *name) {
+void Interface::symlink(Fuse::Request &&req, const char *link, fuse_ino_t parent, std::string_view name) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::rename(Fuse::Request &&req, fuse_ino_t parent, const char *name, fuse_ino_t newparent, const char *newname, unsigned int flags) {
+void Interface::rename(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, fuse_ino_t newparent, std::string_view newname, unsigned int flags) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::link(Fuse::Request &&req, fuse_ino_t ino, fuse_ino_t newparent, const char *name) {
+void Interface::link(Fuse::Request &&req, fuse_ino_t ino, fuse_ino_t newparent, std::string_view name) {
     req.reply_err(ENOSYS);
 }
 
@@ -72,7 +72,7 @@ void Interface::read(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t off
     req.reply_err(ENOSYS);
 }
 
-void Interface::write(Fuse::Request &&req, fuse_ino_t ino, const char *buf, size_t size, off_t off, struct fuse_file_info *fi) {
+void Interface::write(Fuse::Request &&req, fuse_ino_t ino, std::string_view buf, off_t off, struct fuse_file_info *fi) {
     req.reply_err(ENOSYS);
 }
 
@@ -108,11 +108,11 @@ void Interface::statfs(Fuse::Request &&req, fuse_ino_t ino) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::setxattr(Fuse::Request &&req, fuse_ino_t ino, const char *name, const char *value, size_t size, int flags) {
+void Interface::setxattr(Fuse::Request &&req, fuse_ino_t ino, std::string_view name, std::string_view value, int flags) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::getxattr(Fuse::Request &&req, fuse_ino_t ino, const char *name, size_t size) {
+void Interface::getxattr(Fuse::Request &&req, fuse_ino_t ino, std::string_view name, size_t size) {
     req.reply_err(ENOSYS);
 }
 
@@ -120,7 +120,7 @@ void Interface::listxattr(Fuse::Request &&req, fuse_ino_t ino, size_t size) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::removexattr(Fuse::Request &&req, fuse_ino_t ino, const char *name) {
+void Interface::removexattr(Fuse::Request &&req, fuse_ino_t ino, std::string_view name) {
     req.reply_err(ENOSYS);
 }
 
@@ -128,7 +128,7 @@ void Interface::access(Fuse::Request &&req, fuse_ino_t ino, int mask) {
     req.reply_err(ENOSYS);
 }
 
-void Interface::create(Fuse::Request &&req, fuse_ino_t parent, const char *name, mode_t mode, struct fuse_file_info *fi) {
+void Interface::create(Fuse::Request &&req, fuse_ino_t parent, std::string_view name, mode_t mode, struct fuse_file_info *fi) {
     req.reply_err(ENOSYS);
 }
 
