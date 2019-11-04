@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <random>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
@@ -14,66 +13,7 @@
 #include <chrono>
 
 #include "cache/cache.hpp"
-
-std::string random_name()
-{
-    std::random_device dev;
-    std::mt19937_64 engine(dev());
-    std::uniform_int_distribution<std::uint64_t> distribution;
-    const std::uint64_t n1 = distribution(engine);
-    std::stringstream ss;
-    ss << std::hex << std::setw(sizeof(n1) * 2) << std::setfill('0') << std::right
-       << n1;
-    return ss.str();
-}
-
-
-std::filesystem::path custom_mkdtemp()
-{
-    const char *tmpdir = getenv("DRAGONSTASH_TEST_TMP_DIR");
-    if (!tmpdir) {
-        tmpdir = getenv("TMPDIR");
-    }
-    if (!tmpdir) {
-        tmpdir = "/tmp";
-    }
-    std::filesystem::path basepath(tmpdir);
-    std::filesystem::path final = basepath;
-    int rc = 0;
-    do {
-        final /= "dragonstash-test-" + random_name();
-        rc = mkdir(final.c_str(), 0700);
-    } while (rc != 0 && errno == EEXIST);
-    if (rc !=0) {
-        throw std::runtime_error(
-                    std::string("failed to create temporary directory: ") +
-                    std::strerror(errno));
-    }
-    return final;
-}
-
-
-class TestEnvironment {
-public:
-    TestEnvironment():
-        m_path(custom_mkdtemp())
-    {
-
-    }
-
-    ~TestEnvironment()
-    {
-        std::filesystem::remove_all(m_path);
-    }
-
-private:
-    const std::filesystem::path m_path;
-
-public:
-    inline const std::filesystem::path path() const {
-        return m_path;
-    }
-};
+#include "testutils/tempdir.hpp"
 
 
 class TestSetup {
@@ -85,11 +25,11 @@ public:
     }
 
 private:
-    TestEnvironment m_env;
+    TemporaryDirectory m_env;
     Dragonstash::Cache m_cache;
 
 public:
-    inline TestEnvironment &env() {
+    inline TemporaryDirectory &env() {
         return m_env;
     }
 
@@ -597,6 +537,216 @@ SCENARIO("Locked inodes")
                 auto getattr_result = cache.getattr(*emplace_result);
                 CHECK(getattr_result.error() == 0);
                 CHECK(getattr_result);
+            }
+        }
+    }
+}
+
+SCENARIO("Cross-process cache")
+{
+    GIVEN("A cache directory") {
+        TemporaryDirectory env;
+        WHEN("A cache is created with a single locked inode which has been replaced") {
+            ino_t locked_inode = Dragonstash::INVALID_INO;
+
+            {
+                Dragonstash::Cache cache(env.path());
+                Dragonstash::InodeAttributes attr{
+                    .mode = S_IFDIR
+                };
+                auto emplace_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr);
+                CHECK(emplace_result.error() == 0);
+                REQUIRE(emplace_result);
+                locked_inode = *emplace_result;
+
+                auto lock_result = cache.lock(*emplace_result);
+                CHECK(lock_result.error() == 0);
+                REQUIRE(lock_result);
+
+                Dragonstash::InodeAttributes attr2{
+                    .mode = S_IFREG
+                };
+                auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
+                CHECK(override_result.error() == 0);
+                REQUIRE(override_result);
+                CHECK(*override_result != *emplace_result);
+            }
+
+            THEN("The inode is gone after the cache has been restored") {
+                Dragonstash::Cache cache(env.path());
+                auto getattr_result = cache.getattr(locked_inode);
+                CHECK(getattr_result.error() == -ENOENT);
+                CHECK(!getattr_result);
+            }
+        }
+    }
+}
+
+SCENARIO("Storage and retrieval of symlinks") {
+    GIVEN("An empty cache") {
+        TestSetup setup;
+        Dragonstash::Cache &cache = setup.cache();
+
+        WHEN("Calling readlink on a nonexistent inode") {
+            auto read_result = cache.readlink(nonexistent_inode);
+
+            THEN("It returns -ENOENT") {
+                CHECK(read_result.error() == -ENOENT);
+                CHECK(!read_result);
+            }
+        }
+
+        WHEN("Calling writelink on a nonexistent inode") {
+            auto write_result = cache.writelink(nonexistent_inode, "/foo");
+
+            THEN("It returns -ENOENT") {
+                CHECK(write_result.error() == -ENOENT);
+                CHECK(!write_result);
+            }
+        }
+    }
+
+    GIVEN("A cache with a dir and a link") {
+        TestSetup setup;
+        Dragonstash::Cache &cache = setup.cache();
+        Dragonstash::InodeAttributes dir_attrs{
+            .mode = S_IFDIR,
+        };
+        Dragonstash::InodeAttributes link_attrs{
+            .mode = S_IFLNK,
+        };
+
+        auto dir_result = cache.emplace(Dragonstash::ROOT_INO,
+                                        "dir", dir_attrs);
+        auto lnk_result = cache.emplace(Dragonstash::ROOT_INO,
+                                        "lnk", link_attrs);
+
+        CHECK(dir_result.error() == 0);
+        CHECK(dir_result);
+        CHECK(lnk_result.error() == 0);
+        CHECK(lnk_result);
+
+        WHEN("Writing a destination to the link") {
+            auto write_result = cache.writelink(*lnk_result, "/foo");
+
+            THEN("It succeeds") {
+                CHECK(write_result.error() == 0);
+                CHECK(write_result);
+            }
+        }
+
+        WHEN("Calling writelink on a directory") {
+            auto write_result = cache.writelink(*dir_result, "/foo");
+
+            THEN("It fails with -EINVAL") {
+                CHECK(write_result.error() == -EINVAL);
+                CHECK(!write_result);
+            }
+        }
+
+        WHEN("Calling readlink on a directory") {
+            auto read_result = cache.readlink(*dir_result);
+
+            THEN("It fails with -EINVAL") {
+                CHECK(read_result.error() == -EINVAL);
+                CHECK(!read_result);
+            }
+        }
+
+        WHEN("Having written a destination on a link") {
+            auto write_result = cache.writelink(*lnk_result, "/foo");
+            CHECK(write_result.error() == 0);
+            REQUIRE(write_result);
+
+            THEN("It can be read back") {
+                auto read_result = cache.readlink(*lnk_result);
+                CHECK(read_result.error() == 0);
+                REQUIRE(read_result);
+                CHECK(*read_result == "/foo");
+            }
+        }
+
+        WHEN("Replacing a link with a file") {
+            auto write_result = cache.writelink(*lnk_result, "/foo");
+            CHECK(write_result.error() == 0);
+            REQUIRE(write_result);
+
+            Dragonstash::InodeAttributes file_attrs = {
+                .mode = S_IFREG,
+            };
+
+            auto emplace_result = cache.emplace(Dragonstash::ROOT_INO,
+                                                "lnk", file_attrs);
+            CHECK(emplace_result.error() == 0);
+            REQUIRE(emplace_result);
+            CHECK(*emplace_result != *lnk_result);
+
+            THEN("The link is not readable anymore") {
+                auto read_result = cache.readlink(*lnk_result);
+                CHECK(read_result.error() == -ENOENT);
+                CHECK(!read_result);
+            }
+        }
+    }
+}
+
+SCENARIO("Nested directories") {
+    GIVEN("A cache with a directory") {
+        TestSetup setup;
+        Dragonstash::Cache &cache = setup.cache();
+        Dragonstash::InodeAttributes dir1_attrs{
+            .mode = S_IFDIR,
+        };
+
+        auto dir1_result = cache.emplace(Dragonstash::ROOT_INO,
+                                         "dir", dir1_attrs);
+        CHECK(dir1_result.error() == 0);
+        CHECK(dir1_result);
+
+        WHEN("Emplacing a directory inside the first one") {
+            auto dir2_result = cache.emplace(*dir1_result,
+                                             "subdir", dir1_attrs);
+            CHECK(dir2_result.error() == 0);
+            CHECK(dir2_result);
+
+            THEN("It is not visible in the root directory") {
+                auto lookup_result = cache.lookup(Dragonstash::ROOT_INO,
+                                                  "subdir");
+                CHECK(lookup_result.error() == -ENOENT);
+                CHECK(!lookup_result);
+            }
+
+            THEN("It is visible in the first directory") {
+                auto lookup_result = cache.lookup(*dir1_result,
+                                                  "subdir");
+                CHECK(lookup_result.error() == 0);
+                CHECK(*lookup_result == *dir2_result);
+            }
+        }
+
+        WHEN("Emplacing a file over a directory with a child") {
+            auto dir2_result = cache.emplace(*dir1_result,
+                                             "subdir", dir1_attrs);
+            CHECK(dir2_result.error() == 0);
+            CHECK(dir2_result);
+
+            Dragonstash::InodeAttributes file_attrs{
+                .mode = S_IFREG,
+            };
+
+            auto emplace_result = cache.emplace(Dragonstash::ROOT_INO,
+                                                "dir", file_attrs);
+            CHECK(emplace_result.error() == 0);
+            CHECK(emplace_result);
+
+            THEN("The subdirectory is gone") {
+                auto lookup_result = cache.lookup(*dir1_result, "subdir");
+                CHECK(lookup_result.error() == -ENOENT);
+                CHECK(!lookup_result);
+
+                auto getattr_result = cache.getattr(*dir2_result);
+                CHECK(getattr_result.error() == -ENOENT);
+                CHECK(!getattr_result);
             }
         }
     }

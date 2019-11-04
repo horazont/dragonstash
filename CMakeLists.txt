@@ -29,7 +29,9 @@ add_subdirectory(Catch2)
 set(DRAGONSTASH_HEADERS
     include/dragonstash-config.h
     include/backend.hpp
+    include/cache/blocklist.hpp
     include/cache/cache.hpp
+    include/cache/common.hpp
     include/cache/inode.hpp
     include/error.hpp
     include/fuse/buffer.hpp
@@ -41,6 +43,7 @@ set(DRAGONSTASH_HEADERS
 
 set(DRAGONSTASH_SRCS
     src/backend.cpp
+    src/cache/blocklist.cpp
     src/cache/cache.cpp
     src/cache/inode.cpp
     src/error.cpp
@@ -63,10 +66,13 @@ target_link_libraries(dragonstash libdragonstash)
 set(TESTS_SRCS
     tests/main.cpp
     tests/cache/cache.cpp
-    tests/cache/inode.cpp)
+    tests/cache/inode.cpp
+    tests/cache/blocklist.cpp
+    tests/testutils/tempdir.cpp)
 
 add_executable(dragonstash-tests ${TESTS_SRCS})
 target_link_libraries(dragonstash-tests Catch2 lmdb-safe libdragonstash)
+target_include_directories(dragonstash-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
 
 # PLAYGROUND

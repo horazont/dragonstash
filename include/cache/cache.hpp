@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <list>
 
 #include "error.hpp"
 
@@ -12,11 +13,9 @@
 #include "backend.hpp"
 
 #include "cache/inode.hpp"
+#include "cache/common.hpp"
 
 namespace Dragonstash {
-
-static constexpr std::size_t CACHE_PAGE_SIZE = 4096;
-static constexpr std::size_t CACHE_INODE_SIZE = CACHE_PAGE_SIZE / 16;
 
 enum DataPriority {
     READAHEAD = 0,
@@ -81,6 +80,8 @@ private:
     MDBDbi m_inodes_db;
     MDBDbi m_tree_inode_key_db;
     MDBDbi m_tree_name_key_db;
+    MDBDbi m_orphan_db;
+    MDBDbi m_links_db;
 
     size_t m_max_name_length;
 
@@ -115,6 +116,16 @@ public:
         return m_tree_name_key_db;
     }
 
+    [[nodiscard]] inline MDBDbi &orphan_db()
+    {
+        return m_orphan_db;
+    }
+
+    [[nodiscard]] inline MDBDbi &links_db()
+    {
+        return m_links_db;
+    }
+
     [[nodiscard]] inline size_t max_name_length() const
     {
         return m_max_name_length;
@@ -129,6 +140,52 @@ public:
     [[nodiscard]] inline std::unordered_map<ino_t, std::uint64_t> &in_memory_locks() {
         return m_in_memory_locks;
     }
+
+};
+
+
+/**
+ * @brief Handle to a regular, cached file.
+ * 
+ * This handle arbitrates access to the cached file. The file can be manipulated
+ * concurrently. The effects of that are similar to the effects of concurrently
+ * manipulating a file on disk.
+ * 
+ * Most operations will generally not need a valid write transaction, however,
+ * in some cases, (write) access to the LMDB data is required (for example, 
+ * when resizing a file due to a write beyond the current last block).  In such
+ * cases, if not passed a valid write transaction, the methods will start a 
+ * transaction on their own.
+ * 
+ * Note that there is still no synchronisation between the LMDB-backed metadata
+ * and the data inside the cache; in case of a crash, it is possible that 
+ * data is missing from the cache for which LMDB already has metadata.
+ *
+ * Random notes:
+ *
+ * - Three backing files: page list (vector of startpage+size tuples), blockmap
+ *   (two bytes / page with access counter and state), actual data
+ * - Idea: use mmaped file with vector directly. however, that will not work
+ *   because C++ allocators require zero-initialised memory from allocate() and
+ *   do not support reallocate (which would be required to resize the mapping as
+ *   needed).
+ *   -> we need a custom vector-like implementation
+ */
+class RegularFileHandle {
+private:
+    ino_t m_ino;
+    int m_blockmap_fd;
+    int m_blocks_fd;
+    void *m_blockmap_mmap;
+
+public:
+    [[nodiscard]] ino_t inode() const;
+
+    [[nodiscard]] Result<std::size_t> pread(off_t off, void *buf, std::size_t n);
+    [[nodiscard]] Result<std::size_t> pwrite(off_t off, const void *buf, std::size_t n);
+    [[nodiscard]] Result<void> truncate(std::size_t size);
+    [[nodiscard]] Result<void> allocate(int mode, off_t offset, off_t len);
+    [[nodiscard]] Result<void> fsync();
 
 };
 
@@ -210,6 +267,10 @@ public:
     [[nodiscard]] Result<void> lock(ino_t ino);
 
     [[nodiscard]] Result<void> release(ino_t ino);
+
+    [[nodiscard]] Result<std::string> readlink(ino_t ino);
+
+    [[nodiscard]] Result<void> writelink(ino_t ino, std::string_view dest);
 };
 
 
@@ -268,6 +329,7 @@ private:
     CacheDatabase *m_db;
     MDBROTransaction m_txn;
     std::vector<CommitHook> m_commit_hooks;
+    std::list<MDBROTransaction> m_subtxns;
 
 protected:
     [[nodiscard]] inline CacheDatabase &db() {
@@ -333,6 +395,8 @@ public:
 
     [[nodiscard]] Result<Stat> getattr(ino_t ino);
 
+    [[nodiscard]] Result<std::string> readlink(ino_t ino);
+
     inline explicit operator bool() const {
         return bool(m_txn);
     }
@@ -355,6 +419,12 @@ public:
     ~CacheTransactionRW() = default;
 
 private:
+    // TODO: think about how we can properly nest RW transactions internally.
+    // Most importantly, we need correct handling of CommitHooks in case the
+    // nested transaction aborts/commits; the commit hooks have externally
+    // visible side-effects which should not become visible before the outermost
+    // transaction completes; however, at the same time, they are part of the
+    // inner transaction and I'm not sure if they should be checked beforehands?
     [[nodiscard]] inline MDBRWTransactionImpl *rw_transaction() {
         // static_cast is safe here, because the constructor of this class
         // only accepts MDBRWTransaction objects.
@@ -362,6 +432,8 @@ private:
     }
 
     [[nodiscard]] ino_t allocate_next_inode();
+
+    [[nodiscard]] Result<void> make_orphan(ino_t ino);
 
 public:
     [[nodiscard]] inline CacheTransactionRW begin_nested()
@@ -393,11 +465,16 @@ public:
     [[nodiscard]] Result<void> unlink(ino_t parent, ino_t child);
     [[nodiscard]] Result<void> unlink(ino_t parent, std::string_view name);
 
+    // TODO: `which` argument
     [[nodiscard]] Result<void> setattr(ino_t ino, const CommonFileAttributes &attrs);
 
     [[nodiscard]] Result<void> lock(ino_t ino);
 
     [[nodiscard]] Result<void> release(ino_t ino);
+
+    [[nodiscard]] Result<void> clean_orphans();
+
+    [[nodiscard]] Result<void> writelink(ino_t ino, std::string_view dest);
 };
 
 }
