@@ -43,8 +43,9 @@ Everything, literally. But more specifically:
 
 ## Huh? Wasn't this in golang once?
 
-Yes. I got annoyed over golang too much to continue it there. So I ported
-it to a saner language (C++).
+[Yes](https://github.com/horazont/dragonstash-golang). I got annoyed over
+golang too much to continue it there. So I ported it to a saner language
+(C++).
 
 (Yes, I am a bit provocative about the above statement. In the end, it is
 about a matter of taste.)
