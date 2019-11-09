@@ -505,6 +505,8 @@ public:
      * @param rollback Called during abort() and called during commit() if any
      *   transaction has failed its stage 1 check.
      *
+     * Any callback can be nullptr, in which case it is assumed that it succeds.
+     *
      * For a single TransactionHook, the commit flow is the following:
      *
      * 1. Call stage_1_commit. If the result is ok, continue with the next point
@@ -529,7 +531,10 @@ public:
      *   is called
      * - if stage_1_rollback is called, rollback is called after all other
      *   transaction hooks also had their stage_1_rollback called
-     * - transaction hooks are evaluated in order
+     * - transaction hooks are evaluated in order for commit callbacks and
+     *   in reverse order for rollback callbacks
+     * - if stage_2_commit is called, all stage_1_commit callbacks of all
+     *   transaction hooks have executed successfully.
      */
     template <typename T1, typename T2, typename T3, typename T4>
     inline void add_transaction_hook(T1 &&stage_1_commit,
