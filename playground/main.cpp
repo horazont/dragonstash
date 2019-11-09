@@ -7,7 +7,7 @@ void clear(MDBEnv &env, MDBDbi &dbi) {
     MDBOutVal value{};
     int rc;
     while ((rc = cursor.get(key, value, MDB_FIRST)) == 0) {
-        cursor.del();
+        std::cout << key.get<std::uint64_t>() << " " << cursor.del() << std::endl;
     }
 
     if (rc != MDB_NOTFOUND) {
@@ -102,7 +102,7 @@ void printpairs_search(MDBEnv &env, MDBDbi &dbi, std::uint64_t key,
     } while ((rc = cursor.nextprev(keyv, value, MDB_NEXT_DUP)) == 0);
 }
 
-int main(int argc, char **argv) {
+/* int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
     auto env = getMDBEnv("./test", MDB_NOSUBDIR, 0644);
@@ -118,4 +118,8 @@ int main(int argc, char **argv) {
     printpairs_search(*env, db, 3);
 
     printpairs_search(*env, db, 1, MDB_SET_RANGE);
+} */
+
+int main(int argc, char **argv) {
+
 }

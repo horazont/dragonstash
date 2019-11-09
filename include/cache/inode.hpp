@@ -3,9 +3,11 @@
 
 #include <cstdint>
 #include <sys/types.h>
+#include <sys/stat.h>
 
 #include "error.hpp"
 #include "backend.hpp"
+#include "cache/common.hpp"
 
 namespace Dragonstash {
 
@@ -30,6 +32,22 @@ struct InodeAttributes: public CommonFileAttributes {
 
 struct Stat: public InodeAttributes {
     ino_t ino;
+
+    inline operator struct stat() const {
+        struct stat result{};
+        result.st_ino = ino;
+        result.st_mode = mode;
+        result.st_nlink = 1;
+        result.st_uid = uid;
+        result.st_gid = gid;
+        result.st_size = off_t(size);
+        result.st_blksize = CACHE_PAGE_SIZE;
+        result.st_blocks = blkcnt_t(nblocks);
+        result.st_atim = atime;
+        result.st_mtim = mtime;
+        result.st_ctim = ctime;
+        return result;
+    }
 };
 
 struct DirectoryEntry: public Stat {

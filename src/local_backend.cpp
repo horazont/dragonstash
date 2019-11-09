@@ -160,7 +160,7 @@ LocalFilesystem::LocalFilesystem(const std::filesystem::path &root):
 
 }
 
-Result<std::string> LocalFilesystem::map_path(const std::string &s)
+Result<std::string> LocalFilesystem::map_path(std::string_view s)
 {
     std::filesystem::path inner(s);
     if (!inner.is_relative()) {
@@ -172,7 +172,7 @@ Result<std::string> LocalFilesystem::map_path(const std::string &s)
     return full_path.native();
 }
 
-std::unique_ptr<File> LocalFilesystem::open(const std::string &path,
+std::unique_ptr<File> LocalFilesystem::open(std::string_view path,
                                             int accesstype,
                                             mode_t mode)
 {
@@ -189,31 +189,33 @@ std::unique_ptr<File> LocalFilesystem::open(const std::string &path,
     return std::make_unique<LocalFile>(fd);
 }
 
-std::unique_ptr<Dir> LocalFilesystem::opendir(const std::string &path)
+Result<std::unique_ptr<Dir>> LocalFilesystem::opendir(std::string_view path)
 {
     const Result<std::string> full_path = map_path(path);
     if (!full_path) {
-        return nullptr;
+        return make_result(FAILED, EINVAL);
     }
 
     DIR *fd = ::opendir(full_path->c_str());
     if (fd == nullptr) {
-        return nullptr;
+        return make_result(FAILED, errno);
     }
 
     return std::make_unique<LocalDir>(fd);
 }
 
-Result<Stat> LocalFilesystem::lstat(const std::string &path)
+Result<Stat> LocalFilesystem::lstat(std::string_view path)
 {
     const Result<std::string> full_path = map_path(path);
     if (!full_path) {
+        std::cout << "lstat(" << path << ") -> (map_path) " << full_path.error() << std::endl;
         return Result<Stat>(FAILED, full_path.error());
     }
 
     struct stat buf;
     memset(&buf, 0, sizeof(buf));
     if (::lstat(full_path->c_str(), &buf) < 0) {
+        std::cout << "lstat(" << path << ") -> (stat) " << errno << std::endl;
         return Result<Stat>(FAILED, errno);
     }
 

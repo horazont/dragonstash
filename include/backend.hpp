@@ -56,11 +56,11 @@ public:
     virtual ~Filesystem();
 
 public:
-    virtual std::unique_ptr<File> open(const std::string &path,
+    virtual std::unique_ptr<File> open(std::string_view path,
                                        int accesstype,
                                        mode_t mode) = 0;
-    virtual std::unique_ptr<Dir> opendir(const std::string &path) = 0;
-    virtual Result<Stat> lstat(const std::string &path) = 0;
+    virtual Result<std::unique_ptr<Dir>> opendir(std::string_view path) = 0;
+    virtual Result<Stat> lstat(std::string_view path) = 0;
 
 };
 

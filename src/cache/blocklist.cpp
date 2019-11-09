@@ -487,7 +487,7 @@ void Blocklist::mark_internal(const uint64_t start,
 
     if (inserted != m_mapping->end()) {
         auto next = inserted + 1;
-        if (inserted != m_mapping->end()) {
+        if (next != m_mapping->end()) {
             bool success;
             File::iterator merged;
             std::tie(success, merged) = try_merge_with_previous(next);   // invalidates all iterators!

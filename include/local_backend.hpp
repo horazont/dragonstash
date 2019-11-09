@@ -49,15 +49,15 @@ public:
 private:
     std::filesystem::path m_root;
 
-    Result<std::string> map_path(const std::string &s);
+    Result<std::string> map_path(std::string_view s);
 
     // Filesystem interface
 public:
-    std::unique_ptr<File> open(const std::string &path,
+    std::unique_ptr<File> open(std::string_view path,
                                int accesstype,
                                mode_t mode) override;
-    std::unique_ptr<Dir> opendir(const std::string &path) override;
-    Result<Stat> lstat(const std::string &path) override;
+    Result<std::unique_ptr<Dir> > opendir(std::string_view path) override;
+    Result<Stat> lstat(std::string_view path) override;
 
 };
 

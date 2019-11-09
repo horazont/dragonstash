@@ -154,9 +154,13 @@ int main(int argc, char **argv) {
     }
 
     {
-        auto fs = std::make_unique<HelloFilesystem>();
+        const std::filesystem::path cache_path = "./cache";
+        const std::filesystem::path src_path = "/home/horazont/noram-tmp";
+        auto local = std::make_unique<Dragonstash::Backend::LocalFilesystem>(src_path);
+        Dragonstash::Filesystem fs(std::make_unique<Dragonstash::Cache>(cache_path));
+        fs.reset_backend_fs(std::move(local));
         try {
-            Fuse::Session<HelloFilesystem> session(*fs, &args);
+            Fuse::Session<Dragonstash::Filesystem> session(fs, &args);
             if (session.set_signal_handlers() != 0) {
                 std::cerr << "failed to set signal handlers" << std::endl;
                 ret = 1;

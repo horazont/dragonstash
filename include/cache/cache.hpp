@@ -11,6 +11,7 @@
 
 #include "lmdb-safe.hh"
 #include "backend.hpp"
+#include "debug_mutex.hpp"
 
 #include "cache/inode.hpp"
 #include "cache/common.hpp"
@@ -70,8 +71,78 @@ class CacheTransactionRO;
 class CacheTransactionRW;
 
 
+class InodeReferences {
+public:
+    struct Record {
+        std::uint64_t nrefs;
+        bool doomed;
+    };
+
+private:
+    std::unordered_map<ino_t, Record> m_refs;
+
+public:
+    [[nodiscard]] inline Result<std::uint64_t> incref(ino_t ino, std::uint64_t by) {
+        auto iter = m_refs.find(ino);
+        if (iter == m_refs.end()) {
+            m_refs.emplace(ino, Record{by, false});
+            return make_result(by);
+        }
+        if (iter->second.doomed) {
+            return make_result(FAILED, ESTALE);
+        }
+        iter->second.nrefs += by;
+        return make_result(iter->second.nrefs);
+    }
+
+    [[nodiscard]] inline Result<std::uint64_t> decref(ino_t ino, std::uint64_t by) {
+        if (by == 0) {
+            return make_result(FAILED, EINVAL);
+        }
+
+        auto iter = m_refs.find(ino);
+        if (iter == m_refs.end() || iter->second.nrefs < by) {
+            throw std::runtime_error("attempt to decrease counter below zero");
+        }
+        iter->second.nrefs -= by;
+        return make_result(iter->second.nrefs);
+    }
+
+    [[nodiscard]] inline Result<void> doom(ino_t ino) {
+        auto iter = m_refs.find(ino);
+        if (iter == m_refs.end()) {
+            m_refs.emplace(ino, Record{0, true});
+            return make_result();
+        }
+        if (iter->second.nrefs > 0) {
+            return make_result(FAILED, EBUSY);
+        }
+        iter->second.doomed = true;
+        return make_result();
+    }
+
+    [[nodiscard]] inline bool doomed(ino_t ino) const {
+        auto iter = m_refs.find(ino);
+        if (iter == m_refs.end()) {
+            return false;
+        }
+        return iter->second.doomed;
+    }
+
+    [[nodiscard]] inline std::uint64_t refcount(ino_t ino) const {
+        auto iter = m_refs.find(ino);
+        if (iter == m_refs.end()) {
+            return 0;
+        }
+        return iter->second.nrefs;
+    }
+
+};
+
+
 class CacheDatabase {
 public:
+    CacheDatabase() = delete;
     explicit CacheDatabase(std::shared_ptr<MDBEnv> env);
 
 private:
@@ -85,8 +156,8 @@ private:
 
     size_t m_max_name_length;
 
-    std::mutex m_in_memory_lock_mutex;
-    std::unordered_map<ino_t, std::uint64_t> m_in_memory_locks;
+    debug_mutex m_in_memory_lock_mutex;
+    InodeReferences m_in_memory_locks;
 
     void validate_max_key_size();
 
@@ -133,11 +204,11 @@ public:
 
     [[nodiscard]] Result<void> check_name(std::string_view name, bool for_writing);
 
-    [[nodiscard]] inline std::lock_guard<std::mutex> in_memory_lock_guard() {
-        return std::lock_guard<std::mutex>(m_in_memory_lock_mutex);
+    [[nodiscard]] inline auto in_memory_lock_guard() {
+        return std::unique_lock<debug_mutex>(m_in_memory_lock_mutex);
     }
 
-    [[nodiscard]] inline std::unordered_map<ino_t, std::uint64_t> &in_memory_locks() {
+    [[nodiscard]] inline InodeReferences &in_memory_locks() {
         return m_in_memory_locks;
     }
 
@@ -192,6 +263,10 @@ public:
 
 class Cache {
 public:
+    static const bool deadlock_detection;
+
+public:
+    Cache() = delete;
     explicit Cache(const std::filesystem::path &db_path);
     Cache(const Cache &src) = delete;
     Cache(Cache &&src) = delete;
@@ -271,6 +346,8 @@ public:
     [[nodiscard]] Result<std::string> readlink(ino_t ino);
 
     [[nodiscard]] Result<void> writelink(ino_t ino, std::string_view dest);
+
+    [[nodiscard]] Result<std::string> path(ino_t ino);
 };
 
 
@@ -330,6 +407,9 @@ private:
     MDBROTransaction m_txn;
     std::vector<CommitHook> m_commit_hooks;
     std::list<MDBROTransaction> m_subtxns;
+
+protected:
+    std::unique_lock<debug_mutex> m_inode_counter_lock;
 
 protected:
     [[nodiscard]] inline CacheDatabase &db() {
@@ -397,6 +477,47 @@ public:
 
     [[nodiscard]] Result<std::string> readlink(ino_t ino);
 
+    /**
+     * @brief Read a single directory entry from a directory.
+     *
+     * @param prev_end The last inode returned by readdir to continue reading
+     * the directory stream or zero to start from the beginning.
+     * @return error code zero at EOF
+     *
+     * For all directories except the root directory, this also emits the
+     * dot and dotdot entries. For the root directory, only the dot entry is
+     * emitted.
+     *
+     * In the future, dotdot may also be returned for the root inode.
+     */
+    [[nodiscard]] Result<DirectoryEntry> readdir(ino_t dir, ino_t prev_end);
+
+    /**
+     * @brief Reconstruct the full path of an inode.
+     */
+    [[nodiscard]] Result<std::string> path(ino_t ino);
+
+    /**
+     * @brief Increase reference counter of an inode by one.
+     *
+     * Error Codes:
+     *
+     * - ESTALE: The inode has been deleted by a future transaction and
+     *   returning a lock is not safely possible.
+     * - ENOENT: No such inode.
+     */
+    [[nodiscard]] Result<void> lock(ino_t ino);
+
+    /**
+     * @brief Decrease the reference counter of an inode.
+     *
+     * @note The inode is not deleted immediately even if it is orphaned and the
+     * reference counter drops to zero if this is a read-only transaction. If
+     * this is a read-write transaction, the inode may or may not be deleted
+     * immediately.
+     */
+    [[nodiscard]] Result<void> release(ino_t ino, uint64_t nlocks = 1);
+
     inline explicit operator bool() const {
         return bool(m_txn);
     }
@@ -425,6 +546,8 @@ private:
     // visible side-effects which should not become visible before the outermost
     // transaction completes; however, at the same time, they are part of the
     // inner transaction and I'm not sure if they should be checked beforehands?
+    // In addition, we need to transfer the inode lock to the parent in any
+    // case.
     [[nodiscard]] inline MDBRWTransactionImpl *rw_transaction() {
         // static_cast is safe here, because the constructor of this class
         // only accepts MDBRWTransaction objects.
@@ -467,10 +590,6 @@ public:
 
     // TODO: `which` argument
     [[nodiscard]] Result<void> setattr(ino_t ino, const CommonFileAttributes &attrs);
-
-    [[nodiscard]] Result<void> lock(ino_t ino);
-
-    [[nodiscard]] Result<void> release(ino_t ino);
 
     [[nodiscard]] Result<void> clean_orphans();
 

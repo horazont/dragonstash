@@ -29,6 +29,10 @@ public:
     [[nodiscard]] inline const std::basic_string<char> &get() const {
         return m_buf;
     }
+
+    [[nodiscard]] inline std::size_t length() const {
+        return m_buf.size();
+    }
 };
 
 
@@ -56,6 +60,16 @@ public:
 
     [[nodiscard]] inline const std::basic_string<char> &get() const {
         return m_buf;
+    }
+
+    [[nodiscard]] inline std::size_t length() const {
+        return m_buf.size();
+    }
+
+    inline void rewind(std::size_t offs) {
+        if (m_buf.size() > offs) {
+            m_buf.resize(offs);
+        }
     }
 };
 

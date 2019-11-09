@@ -70,7 +70,7 @@ public:
              .readdirplus = &Session<Impl>::readdirplus,
              .copy_file_range = &Session<Impl>::copy_file_range,
              }),
-        m_session(fuse_session_new(args, &m_op, sizeof(m_op), &m_impl))
+        m_session(fuse_session_new(args, &m_op, sizeof(m_op), m_impl))
     {
         if (!m_session) {
             throw std::runtime_error("failed to set up session");

@@ -194,6 +194,7 @@ public: /* REPLY FUNCTIONS */
         return fuse_reply_poll(release(), revents);
     }
 };
+
 }
 
 #endif

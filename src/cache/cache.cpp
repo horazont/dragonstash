@@ -30,6 +30,8 @@ static const std::string_view DB_NAME_META = "meta";
 static const std::string_view DB_NAME_INODES = "inodes";
 static const std::string_view DB_NAME_TREE_INODE_KEY = "treei";
 static const std::string_view DB_NAME_TREE_NAME_KEY = "treen";
+static const std::string_view DB_NAME_ORPHANS = "orphans";
+static const std::string_view DB_NAME_LINKS = "links";
 
 static const std::string_view META_KEY_NEXT_INO = "next_ino";
 
@@ -44,6 +46,13 @@ T safe_dec(T &value, T by = 1)
     }
     value -= by;
     return value;
+}
+
+
+static inline Result<Inode> inode_from_lmdb(const MDBOutVal &val)
+{
+    return Inode::parse(reinterpret_cast<std::uint8_t*>(val.d_mdbval.mv_data),
+                        val.d_mdbval.mv_size);
 }
 
 
@@ -81,7 +90,7 @@ void CachedDir::mark_eof()
 Result<DirectoryEntry> CachedDir::parse_entry(const char *buf, size_t sz)
 {
     if (sz < sizeof(std::uint8_t)) {
-        return make_result(FAILED, -EIO);
+        return make_result(FAILED, EIO);
     }
 
     std::uint8_t version;
@@ -91,14 +100,14 @@ Result<DirectoryEntry> CachedDir::parse_entry(const char *buf, size_t sz)
     case 1:
         return parse_entry_v1(&buf[1], sz-1);
     default:
-        return make_result(FAILED, -EIO);
+        return make_result(FAILED, EIO);
     }
 }
 
 Result<DirectoryEntry> CachedDir::parse_entry_v1(const char *buf, size_t sz)
 {
     if (sz <= sizeof(std::uint64_t) + sizeof(uint32_t)) {
-        return make_result(FAILED, -EIO);
+        return make_result(FAILED, EIO);
     }
 
     DirectoryEntry result{};
@@ -150,12 +159,12 @@ Result<std::tuple<DirectoryEntry, off_t> > CachedDir::ReadDir()
 Result<void> CachedDir::Seek(off_t offset)
 {
     if (offset < 0) {
-        return make_result(FAILED, -EINVAL);
+        return make_result(FAILED, EINVAL);
     }
     if (offset > m_curr_off) {
         /* seeking forward is not supported for now; we should not need this
          * since directories are supposed to be a stream */
-        return make_result(FAILED, -EINVAL);
+        return make_result(FAILED, EINVAL);
     }
     if (offset == m_curr_off) {
         return make_result();
@@ -181,6 +190,8 @@ CacheDatabase::CacheDatabase(std::shared_ptr<MDBEnv> env):
     m_inodes_db(m_env->openDB(DB_NAME_INODES, MDB_CREATE)),
     m_tree_inode_key_db(m_env->openDB(DB_NAME_TREE_INODE_KEY, MDB_CREATE)),
     m_tree_name_key_db(m_env->openDB(DB_NAME_TREE_NAME_KEY, MDB_CREATE)),
+    m_orphan_db(m_env->openDB(DB_NAME_ORPHANS, MDB_CREATE)),
+    m_links_db(m_env->openDB(DB_NAME_LINKS, MDB_CREATE)),
     m_max_name_length(0)
 {
     validate_max_key_size();
@@ -189,8 +200,7 @@ CacheDatabase::CacheDatabase(std::shared_ptr<MDBEnv> env):
 void CacheDatabase::validate_max_key_size()
 {
     const size_t max_key_size = mdb_env_get_maxkeysize(*m_env);
-    /* at least one byte for directory entry names */
-    if (max_key_size < sizeof(ino_t) + 1) {
+    if (max_key_size < sizeof(ino_t) * 2) {
         throw std::runtime_error("cannot use this version of LMDB. maxkeysize too small.");
     }
     m_max_name_length = max_key_size - sizeof(ino_t);
@@ -199,7 +209,7 @@ void CacheDatabase::validate_max_key_size()
 Result<void> CacheDatabase::check_name(std::string_view name, bool for_writing)
 {
     if (name.length() > m_max_name_length) {
-        return make_result(FAILED, -ENAMETOOLONG);
+        return make_result(FAILED, ENAMETOOLONG);
     }
     if (!for_writing) {
         return make_result();
@@ -210,7 +220,7 @@ Result<void> CacheDatabase::check_name(std::string_view name, bool for_writing)
         switch (ch) {
         case 0:
         case '/':
-            return make_result(FAILED, -EINVAL);
+            return make_result(FAILED, EINVAL);
         default:;
         }
     }
@@ -220,8 +230,28 @@ Result<void> CacheDatabase::check_name(std::string_view name, bool for_writing)
 
 /* Dragonstash::Cache */
 
+template<typename T>
+auto with_rw_txn(CacheTransactionRW &&txn, T &&f) -> decltype(f(txn))
+{
+    auto result = f(txn);
+    if (!result) {
+        txn.abort();
+        return result;
+    }
+    (void)txn.clean_orphans();
+    {
+        auto commit_result = txn.commit();
+        if (!commit_result) {
+            return make_result(FAILED, commit_result.error());
+        }
+    }
+    return result;
+}
+
+const bool Cache::deadlock_detection = debug_mutex::is_safe;
+
 Cache::Cache(const std::filesystem::path &db_path):
-    m_db(getMDBEnv((db_path / "db").c_str(), MDB_NOSUBDIR, 0700))
+    m_db(getMDBEnv((db_path / "db").c_str(), MDB_NOSUBDIR, 0600))
 {
     auto txn = m_db.env().getRWTransaction();
     MDBOutVal value{};
@@ -253,8 +283,11 @@ Cache::Cache(const std::filesystem::path &db_path):
         root.serialize(reinterpret_cast<std::uint8_t*>(buf.data()));
         txn->put(m_db.inodes_db(), root_ino, buf);
     }
-
     txn->commit();
+
+    with_rw_txn(begin_rw(), [](CacheTransactionRW &txn){
+        return txn.clean_orphans();
+    });
 }
 
 CacheTransactionRO Cache::begin_ro()
@@ -287,23 +320,6 @@ Result<Stat> Cache::getattr(ino_t ino)
     return begin_ro().getattr(ino);
 }
 
-template<typename T>
-auto with_rw_txn(CacheTransactionRW &&txn, T &&f) -> decltype(f(txn))
-{
-    auto result = f(txn);
-    if (!result) {
-        txn.abort();
-        return result;
-    }
-    {
-        auto commit_result = txn.commit();
-        if (!commit_result) {
-            return make_result(FAILED, commit_result.error());
-        }
-    }
-    return result;
-}
-
 Result<ino_t> Cache::emplace(ino_t parent, std::string_view name, const InodeAttributes &attrs)
 {
     return with_rw_txn(begin_rw(), [parent, name, &attrs](CacheTransactionRW &txn){
@@ -323,6 +339,23 @@ Result<void> Cache::release(ino_t ino)
     return with_rw_txn(begin_rw(), [ino](CacheTransactionRW &txn){
         return txn.release(ino);
     });
+}
+
+Result<std::string> Cache::readlink(ino_t ino)
+{
+    return begin_ro().readlink(ino);
+}
+
+Result<void> Cache::writelink(ino_t ino, std::string_view dest)
+{
+    return with_rw_txn(begin_rw(), [ino, &dest](CacheTransactionRW &txn){
+        return txn.writelink(ino, dest);
+    });
+}
+
+Result<std::string> Cache::path(ino_t ino)
+{
+    return begin_ro().path(ino);
 }
 
 /* Dragonstash::CacheTransactionRO */
@@ -351,7 +384,7 @@ Result<std::string> CacheTransactionRO::name(ino_t parent, ino_t ino)
     if (int rc = cursor.find(key, key_out, value) == MDB_NOTFOUND) {
         // should this be possible? on deletion, we should normally unset the
         // parent...
-        return make_result(FAILED, -ENOENT);
+        return make_result(FAILED, ENOENT);
     }
 
     std::string name(reinterpret_cast<char*>(value.d_mdbval.mv_data),
@@ -377,13 +410,16 @@ Result<std::string> CacheTransactionRO::name(ino_t ino)
 
 Result<ino_t> CacheTransactionRO::parent(ino_t ino)
 {
-    MDBOutVal value{};
-    if (int rc = ro_transaction()->get(db().inodes_db(), ino, value) == MDB_NOTFOUND) {
-        return make_result(FAILED, -ENOENT);
+    if (ino == ROOT_INO) {
+        return ino;
     }
 
-    auto parsed = Inode::parse(reinterpret_cast<std::uint8_t*>(value.d_mdbval.mv_data),
-                               value.d_mdbval.mv_size);
+    MDBOutVal value{};
+    if (int rc = ro_transaction()->get(db().inodes_db(), ino, value) == MDB_NOTFOUND) {
+        return make_result(FAILED, ENOENT);
+    }
+
+    auto parsed = inode_from_lmdb(value);
     if (!parsed) {
         return make_result(FAILED, parsed.error());
     }
@@ -401,7 +437,7 @@ Result<ino_t> CacheTransactionRO::lookup(ino_t parent, std::string_view name)
     }
 
     if (parent == INVALID_INO) {
-        return make_result(FAILED, -EINVAL);
+        return make_result(FAILED, EINVAL);
     }
 
     auto cursor = ro_transaction()->getROCursor(m_db->tree_name_key_db());
@@ -437,18 +473,17 @@ Result<ino_t> CacheTransactionRO::lookup(ino_t parent, std::string_view name)
         }
     }
 
-    return make_result(FAILED, -ENOENT);
+    return make_result(FAILED, ENOENT);
 }
 
 Result<Stat> CacheTransactionRO::getattr(ino_t ino)
 {
     MDBOutVal value{};
     if (ro_transaction()->get(db().inodes_db(), ino, value) == MDB_NOTFOUND) {
-        return make_result(FAILED, -ENOENT);
+        return make_result(FAILED, ENOENT);
     }
 
-    auto parsed = Inode::parse(reinterpret_cast<std::uint8_t*>(value.d_mdbval.mv_data),
-                               value.d_mdbval.mv_size);
+    auto parsed = inode_from_lmdb(value);
     if (!parsed) {
         return copy_error(parsed);
     }
@@ -457,6 +492,161 @@ Result<Stat> CacheTransactionRO::getattr(ino_t ino)
         static_cast<InodeAttributes>(*parsed),
         .ino = ino,
     };
+}
+
+Result<std::string> CacheTransactionRO::readlink(ino_t ino)
+{
+    MDBOutVal value{};
+    if (ro_transaction()->get(db().links_db(), ino, value) == MDB_NOTFOUND) {
+        // check if the entry exists at all; if so, it is not a link -> EINVAL
+        // otherwise, it does not exist -> ENOENT
+        if (ro_transaction()->get(db().inodes_db(), ino, value) == MDB_NOTFOUND) {
+            return make_result(FAILED, ENOENT);
+        }
+        return make_result(FAILED, EINVAL);
+    }
+
+    return std::string(reinterpret_cast<char*>(value.d_mdbval.mv_data),
+                       value.d_mdbval.mv_size);
+}
+
+Result<DirectoryEntry> CacheTransactionRO::readdir(ino_t dir, ino_t prev_end)
+{
+    if (prev_end == 0) {
+        // return dot
+        return make_result(DirectoryEntry{
+                               Stat{
+                                   .ino = dir,
+                               },
+                               .name = std::string("."),
+                               .complete = false,
+                           });
+    }
+    auto parent_result = parent(dir);
+    if (!parent_result) {
+        return make_result(FAILED, EIO);
+    }
+    if (prev_end != *parent_result && prev_end == dir) {
+        // dot dot
+        return make_result(DirectoryEntry{
+                               Stat{
+                                   .ino = *parent_result,
+                               },
+                               .name = std::string(".."),
+                               .complete = false,
+                           });
+    }
+
+    auto cursor = ro_transaction()->getCursor(db().tree_inode_key_db());
+    std::array<ino_t, 2> key{{dir, prev_end}};
+    if (prev_end == *parent_result) {
+        // start iteration from zero
+        key[1] = 0;
+    }
+    const std::size_t key_bytes = key.size() * sizeof(decltype(key)::value_type);
+    MDBInVal key_in(std::string_view(reinterpret_cast<char*>(key.data()),
+                                     key_bytes));
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+    if (cursor.lower_bound(key_in, key_out, value_out) == MDB_NOTFOUND) {
+        // EOF!
+        return make_result(FAILED, 0);
+    }
+    assert(key_out.d_mdbval.mv_size == key_bytes);
+    memcpy(key.data(), key_out.d_mdbval.mv_data, key_bytes);
+
+    if (key[0] != dir) {
+        // EOF!
+        return make_result(FAILED, 0);
+    }
+
+    if (prev_end != 0 && key[1] == prev_end) {
+        // advance by one for the next read
+        if (cursor.next(key_out, value_out) == MDB_NOTFOUND) {
+            // EOF!
+            return make_result(FAILED, 0);
+        }
+        assert(key_out.d_mdbval.mv_size == key_bytes);
+        memcpy(key.data(), key_out.d_mdbval.mv_data, key_bytes);
+
+        if (key[0] != dir) {
+            // EOF!
+            return make_result(FAILED, 0);
+        }
+    }
+
+    std::string_view entry_name(reinterpret_cast<char*>(value_out.d_mdbval.mv_data),
+                                value_out.d_mdbval.mv_size);
+    return make_result(DirectoryEntry{
+                           Stat{
+                               .ino = key[1],
+                           },
+                           .name = std::string(entry_name),
+                           .complete = false,
+                       });
+}
+
+Result<std::string> CacheTransactionRO::path(ino_t ino)
+{
+    std::string buf;
+    do {
+        auto parent_result = parent(ino);
+        if (!parent_result) {
+            return copy_error(parent_result);
+        }
+
+        auto name_result = name(*parent_result, ino);
+        if (!name_result) {
+            return copy_error(name_result);
+        }
+
+        std::size_t offset = buf.size();
+        buf.resize(offset + name_result->size() + 1);
+        std::copy(name_result->rbegin(), name_result->rend(),
+                  &buf[offset]);
+        offset += name_result->size();
+        buf[offset++] = '/';
+        ino = *parent_result;
+    } while (ino != ROOT_INO);
+
+    std::reverse(buf.begin(), buf.end());
+    return buf;
+}
+
+Result<void> CacheTransactionRO::lock(ino_t ino)
+{
+    if (!m_inode_counter_lock) {
+        m_inode_counter_lock = db().in_memory_lock_guard();
+    }
+
+    auto inc_result = db().in_memory_locks().incref(ino, 1);
+    if (!inc_result) {
+        return copy_error(inc_result);
+    }
+
+    add_commit_hook(nullptr, nullptr, nullptr, [this, ino](){
+        (void)db().in_memory_locks().decref(ino, 1);
+    });
+
+    return make_result();
+}
+
+Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
+{
+    if (nlocks == 0) {
+        return make_result();
+    }
+
+    if (!m_inode_counter_lock) {
+        m_inode_counter_lock = db().in_memory_lock_guard();
+    }
+    (void)db().in_memory_locks().decref(ino, nlocks);
+
+    add_commit_hook(nullptr, nullptr, nullptr, [this, ino, nlocks](){
+        (void)db().in_memory_locks().incref(ino, nlocks);
+    });
+
+    return make_result();
 }
 
 void CacheTransactionRO::abort()
@@ -468,6 +658,9 @@ void CacheTransactionRO::abort()
     }
     m_txn->abort();
     m_txn = nullptr;
+    if (m_inode_counter_lock) {
+        m_inode_counter_lock.unlock();
+    }
 }
 
 Result<void> CacheTransactionRO::commit()
@@ -508,6 +701,9 @@ Result<void> CacheTransactionRO::commit()
     m_txn->commit();
     m_commit_hooks.clear();
     m_txn = nullptr;
+    if (m_inode_counter_lock) {
+        m_inode_counter_lock.unlock();
+    }
     return make_result();
 }
 
@@ -533,6 +729,70 @@ ino_t CacheTransactionRW::allocate_next_inode()
     return result;
 }
 
+Result<void> CacheTransactionRW::make_orphan(ino_t ino)
+{
+    Result<ino_t> parent = this->parent(ino);
+    if (!parent) {
+        return copy_error(parent);
+    }
+    if (*parent == INVALID_INO) {
+        // already orphaned
+        // TODO: double-check by looking in the orphan list?
+        return make_result();
+    }
+
+    // when orphaning, we need to unlink the inode from the directory structure
+    // and add it to the orphan database
+    // we don't yet do any clean up or deletion.
+
+    std::string key;
+    key.resize(sizeof(ino_t)*2);
+    memcpy(&key[0], &parent, sizeof(ino_t));
+    memcpy(&key[sizeof(ino_t)], &ino, sizeof(ino_t));
+
+    // look up inode name, calculate the lookup key for the name-keyed database
+    // and delete the entry from the inode-keyed database.
+    {
+        MDBOutVal key_out{};
+        MDBOutVal value_out{};
+        auto ino_cursor = rw_transaction()->getRWCursor(db().tree_inode_key_db());
+        if (ino_cursor.find(key, key_out, value_out) == MDB_NOTFOUND) {
+            return make_result(FAILED, EIO);
+        }
+        std::string_view name(reinterpret_cast<char*>(value_out.d_mdbval.mv_data),
+                              value_out.d_mdbval.mv_size);
+        key.resize(sizeof(ino_t) + name.length());
+        memcpy(&key[sizeof(ino_t)], name.data(), name.length());
+        ino_cursor.del();
+    }
+
+    // delete the entry from the name-keyed database
+    rw_transaction()->del(db().tree_name_key_db(), key);
+
+    const std::uint8_t value = 0;
+    // add the inode to the orphans
+    rw_transaction()->put(db().orphan_db(), ino, value);
+
+    // update the inode itself to set the parent to the invalid inode
+    {
+        MDBOutVal key_out{};
+        MDBOutVal value_out{};
+        auto cursor = rw_transaction()->getCursor(db().inodes_db());
+        if (cursor.find(ino, key_out, value_out) == 0) {
+            auto old_inode = inode_from_lmdb(value_out);
+            if (old_inode) {
+                old_inode->parent = 0;
+                std::string value_buf;
+                value_buf.resize(Inode::serialized_size);
+                old_inode->serialize(reinterpret_cast<std::uint8_t*>(value_buf.data()));
+                cursor.put(key_out, value_buf);
+            }
+        }
+    }
+
+    return make_result();
+}
+
 Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
                                           const InodeAttributes &attrs)
 {
@@ -549,10 +809,7 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
     };
     ino_t ino = allocate_next_inode();
 
-    // Check if inode exists and unlink if needed
-    // TODO: unlink recursively if inode is a directory
-    // TOOD: remove data if non-directory
-    // TODO: move to orphan list instead and allow cleanup in separate threads
+    // orphan old inode if this emplace operation overwrites an existing inode
     {
         auto name_cursor = rw_transaction()->getRWCursor(db().tree_name_key_db());
         std::string key;
@@ -564,31 +821,8 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         MDBOutVal value_out{};
         if (name_cursor.find(key, key_out, value_out) != MDB_NOTFOUND) {
             const auto old_ino = value_out.get<ino_t>();
-            auto guard = db().in_memory_lock_guard();
-            name_cursor.del();
-
-            // re-use the key to construct the key for the other databases
-            key.resize(sizeof(ino_t)*2);
-            memcpy(&key[sizeof(ino_t)], &old_ino, sizeof(ino_t));
-            rw_transaction()->del(db().tree_inode_key_db(), key);
-            /* check if inode is locked via in-memory lock */
-            if (db().in_memory_locks()[old_ino] <= 0) {
-                rw_transaction()->del(db().inodes_db(), old_ino);
-            } else {
-                // we still have to set the parent to zero
-                auto cursor = rw_transaction()->getCursor(db().inodes_db());
-                if (cursor.find(old_ino, key_out, value_out) == 0) {
-                    auto old_inode = Inode::parse(reinterpret_cast<std::uint8_t*>(value_out.d_mdbval.mv_data),
-                                                  value_out.d_mdbval.mv_size);
-                    if (old_inode) {
-                        old_inode->parent = 0;
-                        std::string value_buf;
-                        value_buf.resize(Inode::serialized_size);
-                        old_inode->serialize(reinterpret_cast<std::uint8_t*>(value_buf.data()));
-                        cursor.put(key_out, value_buf);
-                    }
-                }
-            }
+            // if orphaning won't work, we can't be saved anyways
+            (void)make_orphan(old_ino);
         }
     }
 
@@ -602,7 +836,6 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         rw_transaction()->put(db().inodes_db(), key, value);
     }
 
-    // TODO: orphan and delete old inode
     // write directory entry pair
     {
         std::vector<std::uint8_t> buf;
@@ -621,62 +854,95 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         rw_transaction()->put(db().tree_inode_key_db(), key, name);
     }
 
+    (void)clean_orphans();
+
     return ino;
 }
 
-Result<void> CacheTransactionRW::lock(ino_t ino)
+Result<void> CacheTransactionRW::clean_orphans()
 {
-    {
-        auto guard = db().in_memory_lock_guard();
-        db().in_memory_locks()[ino] += 1;
+    if (!m_inode_counter_lock) {
+        m_inode_counter_lock = db().in_memory_lock_guard();
     }
+    auto cursor = rw_transaction()->getRWCursor(db().orphan_db());
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+    int rc = cursor.nextprev(key_out, value_out, MDB_FIRST);
+    while (rc == 0)
+    {
+        const auto ino = key_out.get<ino_t>();
+        const auto doom_result = db().in_memory_locks().doom(ino);
+        if (!doom_result) {
+            // cannot doom -> need to skip
+            rc = cursor.nextprev(key_out, value_out, MDB_NEXT);
+            continue;
+        }
 
-    add_commit_hook(nullptr, nullptr, nullptr, [this, ino](){
-        auto guard = db().in_memory_lock_guard();
-        safe_dec(db().in_memory_locks()[ino]);
-    });
+
+        // TODO: clean up data associated with the inode:
+        // - for S_IFDIR: orphan child inodes recursively
+        // - for S_IFREG: delete cached blocks, release quota
+        // - DONE: for S_IFLNK: delete link destination entry
+        {
+            auto inode_cursor = rw_transaction()->getCursor(db().inodes_db());
+            MDBOutVal key_out{};
+            MDBOutVal value_out{};
+            if (inode_cursor.find(ino, key_out, value_out) == 0) {
+                auto inode_res = inode_from_lmdb(value_out);
+                if (inode_res) {
+                    switch (inode_res->mode & S_IFMT)
+                    {
+                    case S_IFLNK:
+                    {
+                        rw_transaction()->del(db().links_db(), ino);
+                        break;
+                    }
+                    case S_IFDIR:
+                    {
+                        // orphan all child entries of this directory
+                        auto dir_cursor = rw_transaction()->getCursor(db().tree_inode_key_db());
+                        while (int rc = dir_cursor.lower_bound(ino, key_out, value_out) == 0) {
+                            ino_t found_parent_ino;
+                            memcpy(&found_parent_ino, key_out.d_mdbval.mv_data, sizeof(ino_t));
+                            if (found_parent_ino != ino) {
+                                // no more entries in this directory!
+                                break;
+                            }
+
+                            ino_t found_child_ino;
+                            memcpy(&found_child_ino, &reinterpret_cast<std::uint8_t*>(key_out.d_mdbval.mv_data)[sizeof(ino_t)], sizeof(ino_t));
+                            (void)make_orphan(found_child_ino);
+                        }
+                    }
+                    default:;
+                    }
+                }
+                inode_cursor.del();
+            }
+        }
+        cursor.del();
+        // XXX: this is very inefficient, but there doesn’t seem to be a safe
+        // way to detect when the last item has been deleted...?
+        rc = cursor.nextprev(key_out, value_out, MDB_FIRST);
+    }
     return make_result();
 }
 
-Result<void> CacheTransactionRW::release(ino_t ino)
+Result<void> CacheTransactionRW::writelink(ino_t ino, std::string_view dest)
 {
-    bool cleared;
-    {
-        auto guard = db().in_memory_lock_guard();
-        cleared = safe_dec(db().in_memory_locks()[ino]) == 0;
-    }
-    add_commit_hook(nullptr, nullptr, nullptr, [this, ino](){
-        auto guard = db().in_memory_lock_guard();
-        db().in_memory_locks()[ino] += 1;
-    });
-
-    if (!cleared) {
-        return make_result();
-    }
-
-    // inode may have been orphaned, check for deletion
-    auto inode_cursor = rw_transaction()->getRWCursor(db().inodes_db());
-    MDBOutVal key_out{};
     MDBOutVal value_out{};
-    if (inode_cursor.find(ino, key_out, value_out) == MDB_NOTFOUND) {
-        // this does not automatically roll back the transaction though...
-        return make_result(FAILED, -ENOENT);
+    if (rw_transaction()->get(db().links_db(), ino, value_out) == MDB_NOTFOUND) {
+        // check inode type first
+        auto stat_result = getattr(ino);
+        if (!stat_result) {
+            return copy_error(stat_result);
+        }
+        if ((stat_result->mode & S_IFMT) != S_IFLNK) {
+            // not a symlink -> EINVAL
+            return make_result(FAILED, EINVAL);
+        }
     }
-
-    auto inode = Inode::parse(reinterpret_cast<std::uint8_t*>(value_out.d_mdbval.mv_data),
-                              value_out.d_mdbval.mv_size);
-    if (!inode) {
-        return copy_error(inode);
-    }
-
-    if (inode->parent == INVALID_INO) {
-        // orphaned inode
-        // TODO: clean up related data; since it's orphaned, it doesn't have
-        // any directory entries anymore, but blocks and link data may still
-        // exist.
-        inode_cursor.del();
-    }
-
+    rw_transaction()->put(db().links_db(), ino, dest);
     return make_result();
 }
 
