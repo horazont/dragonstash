@@ -89,15 +89,13 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
 
 void Filesystem::forget(Fuse::Request &&req, fuse_ino_t ino, uint64_t nlookup)
 {
-    auto txn = m_cache->begin_rw();
+    auto txn = m_cache->begin_ro();
     auto release_result = txn.release(ino, nlookup);
     if (!release_result) {
         req.reply_err(release_result.error());
         return;
     }
-    txn.commit();
-
-    req.reply_none();
+    (void)txn.commit();
 }
 
 void Filesystem::getattr(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi)
@@ -137,7 +135,11 @@ void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
 
     fi->fh = 0;
     fi->cache_readdir = 1;
-    txn.commit();
+    if (!txn.commit()) {
+        req.reply_err(EIO);
+        return;
+    }
+
     req.reply_open(fi);
 }
 
@@ -241,13 +243,20 @@ void Filesystem::readdirplus(Fuse::Request &&req, fuse_ino_t ino, size_t size, o
     }
 
     auto buf = buffer.get();
-    txn.commit();
+    if (!txn.commit()) {
+        // if the commit fails, we cannot hand out any locks -> we have to
+        // return an error ... Question is if we may want to return ENOSYS
+        // instead which would make things possibly fall back to readdir.
+        req.reply_err(EIO);
+        return;
+    }
+
     req.reply_buf(buf.data(), to_send);
 }
 
 void Filesystem::forget_multi(Fuse::Request &&req, size_t count, fuse_forget_data *forgets)
 {
-    auto txn = m_cache->begin_rw();
+    auto txn = m_cache->begin_ro();
     for (std::size_t i = 0; i < count; ++i) {
         (void)txn.release(forgets[i].ino, forgets[i].nlookup);
     }
