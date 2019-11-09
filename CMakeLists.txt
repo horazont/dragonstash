@@ -33,6 +33,7 @@ set(DRAGONSTASH_HEADERS
     include/cache/cache.hpp
     include/cache/common.hpp
     include/cache/inode.hpp
+    include/debug_mutex.hpp
     include/error.hpp
     include/fuse/buffer.hpp
     include/fuse/interface.hpp
@@ -46,6 +47,7 @@ set(DRAGONSTASH_SRCS
     src/cache/blocklist.cpp
     src/cache/cache.cpp
     src/cache/inode.cpp
+    src/debug_mutex.cpp
     src/error.cpp
     src/fuse/buffer.cpp
     src/fuse/interface.cpp
