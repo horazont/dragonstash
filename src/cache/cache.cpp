@@ -24,6 +24,12 @@
  * - value: uint64_t child_inode + uint32_t mode cache
  */
 
+
+template <typename T>
+constexpr void safe_assert(T &&x) {
+    assert(x);
+}
+
 namespace Dragonstash {
 
 static const std::string_view DB_NAME_META = "meta";
@@ -360,11 +366,33 @@ Result<std::string> Cache::path(ino_t ino)
 
 /* Dragonstash::CacheTransactionRO */
 
-CacheTransactionRO::CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn):
+CacheTransactionRO::CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn,
+                                       CacheTransactionRW *parent):
     m_db(&db),
-    m_txn(std::move(txn))
+    m_txn(std::move(txn)),
+    m_parent(parent)
 {
 
+}
+
+InodeReferences &CacheTransactionRO::inode_in_memory_locks() {
+    if (m_inode_counter_lock) {
+        return db().in_memory_locks();
+    }
+
+    CacheTransactionRW *parent = m_parent;
+    while (parent) {
+        if (parent->m_inode_counter_lock) {
+            return parent->db().in_memory_locks();
+        }
+        parent = parent->m_parent;
+    }
+
+    // we don’t hold the lock and no parent holds the lock -> we need to lock
+    // here.
+    assert(!m_inode_counter_lock);
+    m_inode_counter_lock = db().in_memory_lock_guard();
+    return db().in_memory_locks();
 }
 
 Result<std::string> CacheTransactionRO::name(ino_t parent, ino_t ino)
@@ -615,17 +643,14 @@ Result<std::string> CacheTransactionRO::path(ino_t ino)
 
 Result<void> CacheTransactionRO::lock(ino_t ino)
 {
-    if (!m_inode_counter_lock) {
-        m_inode_counter_lock = db().in_memory_lock_guard();
-    }
-
-    auto inc_result = db().in_memory_locks().incref(ino, 1);
+    auto &inode_locks = inode_in_memory_locks();
+    auto inc_result = inode_locks.incref(ino, 1);
     if (!inc_result) {
         return copy_error(inc_result);
     }
 
-    add_commit_hook(nullptr, nullptr, nullptr, [this, ino](){
-        (void)db().in_memory_locks().decref(ino, 1);
+    add_commit_hook(nullptr, nullptr, nullptr, [&inode_locks, ino](){
+        safe_assert(inode_locks.decref(ino, 1));
     });
 
     return make_result();
@@ -637,13 +662,11 @@ Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
         return make_result();
     }
 
-    if (!m_inode_counter_lock) {
-        m_inode_counter_lock = db().in_memory_lock_guard();
-    }
-    (void)db().in_memory_locks().decref(ino, nlocks);
+    auto &inode_locks = inode_in_memory_locks();
+    safe_assert(inode_locks.decref(ino, nlocks));
 
-    add_commit_hook(nullptr, nullptr, nullptr, [this, ino, nlocks](){
-        (void)db().in_memory_locks().incref(ino, nlocks);
+    add_commit_hook(nullptr, nullptr, nullptr, [&inode_locks, ino, nlocks](){
+        safe_assert(inode_locks.incref(ino, nlocks));
     });
 
     return make_result();
@@ -702,15 +725,19 @@ Result<void> CacheTransactionRO::commit()
     m_commit_hooks.clear();
     m_txn = nullptr;
     if (m_inode_counter_lock) {
-        m_inode_counter_lock.unlock();
+        if (m_parent) {
+            m_parent->m_inode_counter_lock = std::move(m_inode_counter_lock);
+        } else {
+            m_inode_counter_lock.unlock();
+        }
     }
     return make_result();
 }
 
 /* Dragonstash::CacheTransactionRW */
 
-CacheTransactionRW::CacheTransactionRW(CacheDatabase &cache, MDBRWTransaction &&txn):
-    CacheTransactionRO(cache, std::move(txn))
+CacheTransactionRW::CacheTransactionRW(CacheDatabase &cache, MDBRWTransaction &&txn, CacheTransactionRW *parent):
+    CacheTransactionRO(cache, std::move(txn), parent)
 {
 
 }
@@ -861,9 +888,7 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
 
 Result<void> CacheTransactionRW::clean_orphans()
 {
-    if (!m_inode_counter_lock) {
-        m_inode_counter_lock = db().in_memory_lock_guard();
-    }
+    auto &inode_locks = inode_in_memory_locks();
     auto cursor = rw_transaction()->getRWCursor(db().orphan_db());
     MDBOutVal key_out{};
     MDBOutVal value_out{};
@@ -871,7 +896,7 @@ Result<void> CacheTransactionRW::clean_orphans()
     while (rc == 0)
     {
         const auto ino = key_out.get<ino_t>();
-        const auto doom_result = db().in_memory_locks().doom(ino);
+        const auto doom_result = inode_locks.doom(ino);
         if (!doom_result) {
             // cannot doom -> need to skip
             rc = cursor.nextprev(key_out, value_out, MDB_NEXT);

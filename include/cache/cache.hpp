@@ -78,6 +78,14 @@ public:
         bool doomed;
     };
 
+public:
+    InodeReferences() = default;
+    InodeReferences(const InodeReferences &src) = delete;
+    InodeReferences(InodeReferences &&src) = delete;
+    InodeReferences &operator=(const InodeReferences &src) = delete;
+    InodeReferences &operator=(InodeReferences &&src) = delete;
+    ~InodeReferences() = default;
+
 private:
     std::unordered_map<ino_t, Record> m_refs;
 
@@ -353,7 +361,8 @@ public:
 
 class CacheTransactionRO {
 protected:
-    CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn);
+    CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn,
+                       CacheTransactionRW *parent = nullptr);
 
 public:
     /**
@@ -405,16 +414,16 @@ public:
 private:
     CacheDatabase *m_db;
     MDBROTransaction m_txn;
+    CacheTransactionRW *m_parent;
     std::vector<CommitHook> m_commit_hooks;
-    std::list<MDBROTransaction> m_subtxns;
-
-protected:
     std::unique_lock<debug_mutex> m_inode_counter_lock;
 
 protected:
     [[nodiscard]] inline CacheDatabase &db() {
         return *m_db;
     }
+
+    [[nodiscard]] inline InodeReferences &inode_in_memory_locks();
 
     [[nodiscard]] inline MDBROTransactionImpl *ro_transaction() {
         return m_txn.get();
@@ -530,7 +539,8 @@ public:
 
 class CacheTransactionRW: public CacheTransactionRO {
 protected:
-    CacheTransactionRW(CacheDatabase &cache, MDBRWTransaction &&txn);
+    CacheTransactionRW(CacheDatabase &cache, MDBRWTransaction &&txn,
+                       CacheTransactionRW *parent = nullptr);
 
 public:
     CacheTransactionRW(const CacheTransactionRW &src) = delete;
@@ -561,7 +571,7 @@ private:
 public:
     [[nodiscard]] inline CacheTransactionRW begin_nested()
     {
-        return CacheTransactionRW(db(), rw_transaction()->getRWTransaction());
+        return CacheTransactionRW(db(), rw_transaction()->getRWTransaction(), this);
     }
 
     [[nodiscard]] inline CacheTransactionRO begin_nested_ro()

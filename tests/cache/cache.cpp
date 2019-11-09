@@ -1171,3 +1171,51 @@ SCENARIO("Read-committed isolation level for locks") {
         }
     }
 }
+
+SCENARIO("Transaction nesting") {
+    GIVEN("A cache with a directory") {
+        TestSetup setup;
+        Dragonstash::Cache &cache = setup.cache();
+
+        Dragonstash::InodeAttributes dir_attrs{
+            .mode = S_IFDIR,
+        };
+
+        Dragonstash::InodeAttributes file_attrs{
+            .mode = S_IFREG,
+        };
+
+        auto d1_r = cache.emplace(Dragonstash::ROOT_INO, "d1", dir_attrs);
+        CHECK(d1_r.error() == 0);
+        REQUIRE(d1_r);
+
+        WHEN("Locking an inode in both the parent and the nested transaction") {
+            auto txn = cache.begin_rw();
+            auto lock1_result = txn.lock(*d1_r);
+            auto txn2 = txn.begin_nested();
+            auto lock2_result = txn2.lock(*d1_r);
+
+            THEN("Both locks succeed") {
+                CHECK(lock1_result);
+                CHECK(lock2_result);
+            }
+
+            THEN("The file can be released twice from the inner transaction") {
+                CHECK(txn2.release(*d1_r, 2));
+            }
+
+            THEN("The file can be released only once after the inner transaction has been aborted") {
+                txn2.abort();
+                CHECK_THROWS_WITH(
+                            txn.release(*d1_r, 2),
+                            Catch::Matchers::Contains("counter below zero"));
+                CHECK(txn.release(*d1_r, 1));
+            }
+
+            THEN("The file can be released twice after the inner transaction has committed") {
+                txn2.commit();
+                CHECK(txn.release(*d1_r, 2));
+            }
+        }
+    }
+}
