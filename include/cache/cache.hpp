@@ -359,50 +359,102 @@ public:
 };
 
 
+/**
+ * @brief A group of functions which may be executed when the transaction
+ * commits or aborts.
+ *
+ * @see CacheTransactionRO::add_transaction_hook for semantics.
+ */
+class TransactionHook
+{
+public:
+    TransactionHook() = default;
+    template <typename T1, typename T2, typename T3, typename T4>
+    TransactionHook(T1 &&stage_1_commit,
+                    T2 &&stage_1_rollback,
+                    T3 &&stage_2_commit,
+                    T4 &&rollback):
+        m_stage_1_commit(std::forward<T1>(stage_1_commit)),
+        m_stage_1_rollback(std::forward<T2>(stage_1_rollback)),
+        m_stage_2_commit(std::forward<T3>(stage_2_commit)),
+        m_rollback(std::forward<T4>(rollback))
+    {
+
+    }
+    TransactionHook(const TransactionHook &src) = delete;
+    TransactionHook(TransactionHook &&src) = default;
+    TransactionHook &operator=(const TransactionHook &src) = delete;
+    TransactionHook &operator=(TransactionHook &&src) = default;
+    ~TransactionHook() = default;
+
+private:
+    /**
+     * @brief Executed on commit
+     *
+     * @see CacheTransactionRO::add_transaction_hook for semantics.
+     */
+    std::function<Result<void>()> m_stage_1_commit;
+
+    /**
+     * @brief Executed when a later commit hook failed
+     *
+     * @see CacheTransactionRO::add_transaction_hook for semantics.
+     */
+    std::function<void()> m_stage_1_rollback;
+
+    /**
+     * @brief Executed when all pre commit hooks have passed.
+     *
+     * @see CacheTransactionRO::add_transaction_hook for semantics.
+     */
+    std::function<void()> m_stage_2_commit;
+
+    /**
+     * @brief Executed when the transaction is rolled back.
+     *
+     * @see CacheTransactionRO::add_transaction_hook for semantics.
+     */
+    std::function<void()> m_rollback;
+
+    bool m_stage_1_ran{false};
+
+public:
+    [[nodiscard]] inline Result<void> stage_1_commit() {
+        if (m_stage_1_commit) {
+            auto result = m_stage_1_commit();
+            if (result) {
+                m_stage_1_ran = true;
+            }
+            return result;
+        }
+        return make_result();
+    }
+
+    inline void stage_1_rollback() {
+        if (m_stage_1_ran && m_stage_1_rollback) {
+            m_stage_1_rollback();
+        }
+    }
+
+    inline void stage_2_commit() {
+        if (m_stage_2_commit) {
+            m_stage_2_commit();
+        }
+    }
+
+    inline void rollback() {
+        if (m_rollback) {
+            m_rollback();
+        }
+    }
+
+};
+
+
 class CacheTransactionRO {
 protected:
     CacheTransactionRO(CacheDatabase &db, MDBROTransaction &&txn,
                        CacheTransactionRW *parent = nullptr);
-
-public:
-    /**
-     * A group of functions which may be executed when the transaction commits
-     * or aborts.
-     */
-    struct TransactionHook
-    {
-        /**
-         * @brief Executed on commit
-         *
-         * If the function returns a non-success result, all previously
-         * executed CommitHooks will have their pre_rollback function called and
-         * the transaction will abort instead of commit.
-         *
-         * The result is returned from the commit method.
-         */
-        std::function<Result<void>()> stage_1_commit;
-
-        /**
-         * @brief Executed when a later commit hook failed
-         *
-         * This is to allow a commit hook to roll back changes which it has
-         * prepared to commit if later commit hooks have failed.
-         */
-        std::function<void()> stage_1_rollback;
-
-        /**
-         * @brief Executed when all pre commit hooks have passed.
-         *
-         * This function must not fail, otherwise the results will be
-         * inconsistent.
-         */
-        std::function<void()> stage_2_commit;
-
-        /**
-         * @brief Executed when the transaction is rolled back.
-         */
-        std::function<void()> rollback;
-    };
 
 public:
     CacheTransactionRO(const CacheTransactionRO &src) = delete;
@@ -442,20 +494,60 @@ public:
         m_transaction_hooks.emplace_back(std::forward<T>(src));
     }
 
+    /**
+     * @brief Add a new transaction hook.
+     *
+     * @param stage_1_commit Called during commit()
+     * @param stage_1_rollback Called during commit() if a later transaction
+     *   hook failed its stage 1 check
+     * @param stage_2_commit Called during commit() after all transaction hooks
+     *   have passed their stage 1 check
+     * @param rollback Called during abort() and called during commit() if any
+     *   transaction has failed its stage 1 check.
+     *
+     * For a single TransactionHook, the commit flow is the following:
+     *
+     * 1. Call stage_1_commit. If the result is ok, continue with the next point
+     *    below.
+     *
+     *    If the result is *not* ok, the following happens:
+     *    1. All previous transaction hooks have their stage_1_rollback called
+     *       in reverse order.
+     *    2. All transaction hooks have their rollback called in reverse order.
+     *    3. The transaction is aborted and the error code of the first failing
+     *       hook is returned.
+     *
+     * 2. Call stage_2_commit. This must not fail.
+     *
+     * The CacheTransactionRO class gives the following guarantees:
+     *
+     * - stage_1_commit has been called exactly once for a transaction which
+     *   committed successfully
+     * - stage_2_commit has been called exactly once for a transaction which
+     *   committed successfully
+     * - if stage_1_commit is called, either stage_2_commit or stage_1_rollback
+     *   is called
+     * - if stage_1_rollback is called, rollback is called after all other
+     *   transaction hooks also had their stage_1_rollback called
+     * - transaction hooks are evaluated in order
+     */
     template <typename T1, typename T2, typename T3, typename T4>
     inline void add_transaction_hook(T1 &&stage_1_commit,
                                      T2 &&stage_1_rollback,
                                      T3 &&stage_2_commit,
                                      T4 &&rollback)
     {
-        m_transaction_hooks.emplace_back(TransactionHook{
-                                        std::forward<T1>(stage_1_commit),
-                                        std::forward<T2>(stage_1_rollback),
-                                        std::forward<T3>(stage_2_commit),
-                                        std::forward<T4>(rollback),
-                                    });
+        m_transaction_hooks.emplace_back(std::forward<T1>(stage_1_commit),
+                                         std::forward<T2>(stage_1_rollback),
+                                         std::forward<T3>(stage_2_commit),
+                                         std::forward<T4>(rollback));
     }
 
+    /**
+     * @brief Add a new transaction hook which only uses commit callbacks.
+     *
+     * @see add_transaction_hook
+     */
     template <typename T1, typename T2, typename T3>
     inline void add_commit_hook(T1 &&stage_1_commit,
                                 T2 &&stage_1_rollback,
@@ -467,6 +559,11 @@ public:
                              nullptr);
     }
 
+    /**
+     * @brief Add a new transaction hook which only uses the rollback callback.
+     *
+     * @see add_transaction_hook
+     */
     template <typename T1>
     inline void add_rollback_hook(T1 &&rollback) {
         add_transaction_hook(nullptr, nullptr, nullptr,

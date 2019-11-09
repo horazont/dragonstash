@@ -674,14 +674,19 @@ Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
 
 void CacheTransactionRO::abort()
 {
+    // two separate loops here to ensure that all stage 1 rollback callbacks
+    // run before all transaction rollback callbacks
     for (auto iter = m_transaction_hooks.rbegin();
          iter != m_transaction_hooks.rend();
          ++iter)
     {
-        TransactionHook &hook = *iter;
-        if (hook.rollback) {
-            hook.rollback();
-        }
+        iter->stage_1_rollback();
+    }
+    for (auto iter = m_transaction_hooks.rbegin();
+         iter != m_transaction_hooks.rend();
+         ++iter)
+    {
+        iter->rollback();
     }
     m_txn->abort();
     m_txn = nullptr;
@@ -700,19 +705,8 @@ Result<void> CacheTransactionRO::commit()
         Result<void> result;
         auto iter = m_transaction_hooks.begin();
         for (; iter != m_transaction_hooks.end(); ++iter) {
-            TransactionHook &hook = *iter;
-            if (!hook.stage_1_commit) {
-                continue;
-            }
-            result = hook.stage_1_commit();
+            result = iter->stage_1_commit();
             if (!result) {
-                while (iter != m_transaction_hooks.begin()) {
-                    --iter;
-                    auto &hook = *iter;
-                    if (hook.stage_1_rollback) {
-                        hook.stage_1_rollback();
-                    }
-                }
                 abort();
                 return result;
             }
@@ -720,15 +714,14 @@ Result<void> CacheTransactionRO::commit()
 
         // now all preparations have passed, we can go on and execute the commit
         for (TransactionHook &hook: m_transaction_hooks) {
-            if (hook.stage_2_commit) {
-                hook.stage_2_commit();
-            }
+            hook.stage_2_commit();
         }
     }
 
     m_txn->commit();
     if (m_parent) {
-        // move all transaction hooks to parent
+        // move all transaction hooks to parent: note that we don't execute any
+        // of them in this transaction, not even the pre-checks.
         std::move(m_transaction_hooks.begin(),
                   m_transaction_hooks.end(),
                   std::back_inserter(m_parent->m_transaction_hooks));
