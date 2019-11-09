@@ -649,7 +649,7 @@ Result<void> CacheTransactionRO::lock(ino_t ino)
         return copy_error(inc_result);
     }
 
-    add_commit_hook(nullptr, nullptr, nullptr, [&inode_locks, ino](){
+    add_transaction_hook(nullptr, nullptr, nullptr, [&inode_locks, ino](){
         safe_assert(inode_locks.decref(ino, 1));
     });
 
@@ -665,7 +665,7 @@ Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
     auto &inode_locks = inode_in_memory_locks();
     safe_assert(inode_locks.decref(ino, nlocks));
 
-    add_commit_hook(nullptr, nullptr, nullptr, [&inode_locks, ino, nlocks](){
+    add_transaction_hook(nullptr, nullptr, nullptr, [&inode_locks, ino, nlocks](){
         safe_assert(inode_locks.incref(ino, nlocks));
     });
 
@@ -674,7 +674,11 @@ Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
 
 void CacheTransactionRO::abort()
 {
-    for (CommitHook &hook: m_commit_hooks) {
+    for (auto iter = m_transaction_hooks.rbegin();
+         iter != m_transaction_hooks.rend();
+         ++iter)
+    {
+        TransactionHook &hook = *iter;
         if (hook.rollback) {
             hook.rollback();
         }
@@ -692,37 +696,44 @@ Result<void> CacheTransactionRO::commit()
         return make_result();
     }
 
-    Result<void> result;
-    auto iter = m_commit_hooks.begin();
-    for (; iter != m_commit_hooks.end(); ++iter) {
-        CommitHook &hook = *iter;
-        if (!hook.stage_1_commit) {
-            continue;
-        }
-        result = hook.stage_1_commit();
-        if (!result) {
-            // rollback!
-            --iter;
-            do {
-                CommitHook &rb_hook = *iter;
-                if (rb_hook.stage_1_rollback) {
-                    rb_hook.stage_1_rollback();
+    if (!m_parent) {
+        Result<void> result;
+        auto iter = m_transaction_hooks.begin();
+        for (; iter != m_transaction_hooks.end(); ++iter) {
+            TransactionHook &hook = *iter;
+            if (!hook.stage_1_commit) {
+                continue;
+            }
+            result = hook.stage_1_commit();
+            if (!result) {
+                while (iter != m_transaction_hooks.begin()) {
+                    --iter;
+                    auto &hook = *iter;
+                    if (hook.stage_1_rollback) {
+                        hook.stage_1_rollback();
+                    }
                 }
-            } while (iter != m_commit_hooks.end());
-            abort();
-            return result;
+                abort();
+                return result;
+            }
         }
-    }
 
-    // now all preparations have passed, we can go on and execute the commit
-    for (CommitHook &hook: m_commit_hooks) {
-        if (hook.stage_2_commit) {
-            hook.stage_2_commit();
+        // now all preparations have passed, we can go on and execute the commit
+        for (TransactionHook &hook: m_transaction_hooks) {
+            if (hook.stage_2_commit) {
+                hook.stage_2_commit();
+            }
         }
     }
 
     m_txn->commit();
-    m_commit_hooks.clear();
+    if (m_parent) {
+        // move all transaction hooks to parent
+        std::move(m_transaction_hooks.begin(),
+                  m_transaction_hooks.end(),
+                  std::back_inserter(m_parent->m_transaction_hooks));
+    }
+    m_transaction_hooks.clear();
     m_txn = nullptr;
     if (m_inode_counter_lock) {
         if (m_parent) {
@@ -905,7 +916,7 @@ Result<void> CacheTransactionRW::clean_orphans()
 
 
         // TODO: clean up data associated with the inode:
-        // - for S_IFDIR: orphan child inodes recursively
+        // - DONE: for S_IFDIR: orphan child inodes recursively
         // - for S_IFREG: delete cached blocks, release quota
         // - DONE: for S_IFLNK: delete link destination entry
         {

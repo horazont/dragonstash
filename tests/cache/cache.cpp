@@ -1172,6 +1172,242 @@ SCENARIO("Read-committed isolation level for locks") {
     }
 }
 
+SCENARIO("Transaction hooks") {
+    GIVEN("An empty cache") {
+        TestSetup setup;
+        Dragonstash::Cache &cache = setup.cache();
+
+        WHEN("Adding a passing commit hook to a tranasction") {
+            auto txn = cache.begin_rw();
+            std::atomic<bool> stage_1_ran(false);
+            std::atomic<bool> stage_1_rollback_ran(false);
+            std::atomic<bool> stage_2_ran(false);
+            txn.add_commit_hook([&stage_1_ran](){
+                stage_1_ran = true;
+                return Dragonstash::make_result();
+            }, [&stage_1_rollback_ran](){
+                stage_1_rollback_ran = true;
+            }, [&stage_2_ran](){
+                stage_2_ran = true;
+            });
+            CHECK(!stage_1_ran);
+            CHECK(!stage_1_rollback_ran);
+            CHECK(!stage_2_ran);
+
+            AND_WHEN("The transaction commits") {
+                CHECK(txn.commit());
+
+                THEN("Both stages are called") {
+                    CHECK(stage_1_ran);
+                    CHECK(stage_2_ran);
+                }
+
+                THEN("Stage 1 rollback is not called") {
+                    CHECK(!stage_1_rollback_ran);
+                }
+            }
+
+            AND_WHEN("The transaction aborts") {
+                txn.abort();
+
+                THEN("Neither stage is called") {
+                    CHECK(!stage_1_ran);
+                    CHECK(!stage_2_ran);
+                }
+
+                THEN("Stage 1 rollback is not called") {
+                    CHECK(!stage_1_rollback_ran);
+                }
+            }
+        }
+
+        WHEN("Adding a failing commit hook to a tranasction") {
+            static constexpr int random_errno = 1234;
+            auto txn = cache.begin_rw();
+
+            Dragonstash::InodeAttributes dir_attrs{
+                .mode = S_IFDIR,
+            };
+            auto emplace_result = txn.emplace(Dragonstash::ROOT_INO, "test", dir_attrs);
+
+            std::atomic<bool> stage_1_ran(false);
+            std::atomic<bool> stage_1_rollback_ran(false);
+            std::atomic<bool> stage_2_ran(false);
+            std::atomic<bool> rollback_ran(false);
+            txn.add_transaction_hook([&stage_1_ran](){
+                stage_1_ran = true;
+                return Dragonstash::make_result(Dragonstash::FAILED, random_errno);
+            }, [&stage_1_rollback_ran](){
+                stage_1_rollback_ran = true;
+            }, [&stage_2_ran](){
+                stage_2_ran = true;
+            }, [&rollback_ran](){
+                rollback_ran = true;
+            });
+            CHECK(!stage_1_ran);
+            CHECK(!stage_1_rollback_ran);
+            CHECK(!stage_2_ran);
+            CHECK(!rollback_ran);
+
+            AND_WHEN("The transaction attempts to commit") {
+                auto commit_result = txn.commit();
+
+                THEN("The commit fails") {
+                    CHECK(!commit_result);
+                }
+
+                THEN("The error code is propagated") {
+                    CHECK(commit_result.error() == random_errno);
+                }
+
+                THEN("Stage 1 is called") {
+                    CHECK(stage_1_ran);
+                }
+
+                THEN("Stage 2 is not called") {
+                    CHECK(!stage_2_ran);
+                }
+
+                THEN("Stage 1 rollback is not called") {
+                    CHECK(!stage_1_rollback_ran);
+                }
+
+                THEN("Changes made by the transaction are not visible") {
+                    CHECK(emplace_result);
+
+                    auto lookup_result = cache.lookup(Dragonstash::ROOT_INO, "test");
+                    CHECK(lookup_result.error() == ENOENT);
+                    CHECK(!lookup_result);
+                }
+
+                THEN("The transaction has stopped") {
+                    auto other_txn = cache.begin_rw();
+                    CHECK(other_txn);
+                }
+
+                THEN("Rollback is called") {
+                    CHECK(rollback_ran);
+                }
+            }
+
+            AND_WHEN("The transaction aborts") {
+                txn.abort();
+
+                THEN("No handler is called") {
+                    CHECK(!stage_1_ran);
+                    CHECK(!stage_2_ran);
+                    CHECK(!stage_1_rollback_ran);
+                }
+
+                THEN("Changes made by the transaction are not visible") {
+                    CHECK(emplace_result);
+
+                    auto lookup_result = cache.lookup(Dragonstash::ROOT_INO, "test");
+                    CHECK(lookup_result.error() == ENOENT);
+                    CHECK(!lookup_result);
+                }
+
+                THEN("Rollback is called") {
+                    CHECK(rollback_ran);
+                }
+            }
+        }
+
+        WHEN("Adding three commit hooks: c1 (passing), c2 (failing), c3 (passing)") {
+            auto txn = cache.begin_rw();
+            std::atomic<unsigned int> ctr(0);
+            std::atomic<unsigned int> c1_stage_1_ran(0);
+            std::atomic<unsigned int> c1_stage_1_rollback_ran(0);
+            std::atomic<unsigned int> c1_stage_2_ran(0);
+            std::atomic<unsigned int> c1_rollback_ran(0);
+            std::atomic<unsigned int> c2_stage_1_ran(0);
+            std::atomic<unsigned int> c2_stage_1_rollback_ran(0);
+            std::atomic<unsigned int> c2_stage_2_ran(0);
+            std::atomic<unsigned int> c2_rollback_ran(0);
+            std::atomic<unsigned int> c3_stage_1_ran(0);
+            std::atomic<unsigned int> c3_stage_1_rollback_ran(0);
+            std::atomic<unsigned int> c3_stage_2_ran(0);
+            std::atomic<unsigned int> c3_rollback_ran(0);
+
+            txn.add_transaction_hook([&c1_stage_1_ran, &ctr](){
+                c1_stage_1_ran = ++ctr;
+                return Dragonstash::make_result();
+            }, [&c1_stage_1_rollback_ran, &ctr](){
+                c1_stage_1_rollback_ran = ++ctr;
+            }, [&c1_stage_2_ran, &ctr](){
+                c1_stage_2_ran = ++ctr;
+            }, [&c1_rollback_ran, &ctr](){
+                c1_rollback_ran = ++ctr;
+            });
+
+            txn.add_transaction_hook([&c2_stage_1_ran, &ctr](){
+                c2_stage_1_ran = ++ctr;
+                return Dragonstash::make_result(Dragonstash::FAILED, EINVAL);
+            }, [&c2_stage_1_rollback_ran, &ctr](){
+                c2_stage_1_rollback_ran = ++ctr;
+            }, [&c2_stage_2_ran, &ctr](){
+                c2_stage_2_ran = ++ctr;
+            }, [&c2_rollback_ran, &ctr](){
+                c2_rollback_ran = ++ctr;
+            });
+
+            txn.add_transaction_hook([&c3_stage_1_ran, &ctr](){
+                c3_stage_1_ran = ++ctr;
+                return Dragonstash::make_result();
+            }, [&c3_stage_1_rollback_ran, &ctr](){
+                c3_stage_1_rollback_ran = ++ctr;
+            }, [&c3_stage_2_ran, &ctr](){
+                c3_stage_2_ran = ++ctr;
+            }, [&c3_rollback_ran, &ctr](){
+                c3_rollback_ran = ++ctr;
+            });
+
+            AND_WHEN("The transaction attempts to commit") {
+                auto commit_result = txn.commit();
+
+                THEN("Commit fails") {
+                    CHECK(!commit_result);
+                }
+
+                THEN("Stage 1 runs for c1 and c2 in the correct order") {
+                    CHECK(c1_stage_1_ran);
+                    CHECK(c2_stage_1_ran);
+                }
+
+                THEN("Stage 1 does not run for c3") {
+                    CHECK(!c3_stage_1_ran);
+                }
+
+                THEN("Stage 1 rollback runs for c1, but not for c2 or c3") {
+                    CHECK(c1_stage_1_rollback_ran);
+                    CHECK(!c2_stage_1_rollback_ran);
+                    CHECK(!c3_stage_1_rollback_ran);
+                }
+
+                THEN("Stage 2 is not run for any") {
+                    CHECK(!c1_stage_2_ran);
+                    CHECK(!c2_stage_2_ran);
+                    CHECK(!c3_stage_2_ran);
+                }
+
+                THEN("Rollback runs for all") {
+                    CHECK(c1_rollback_ran);
+                    CHECK(c2_rollback_ran);
+                    CHECK(c3_rollback_ran);
+                }
+
+                THEN("All hooks are called in the right order") {
+                    CHECK(c1_stage_1_ran < c2_stage_1_ran);
+                    CHECK(c2_stage_2_ran < c1_stage_1_rollback_ran);
+                    CHECK(c1_stage_1_rollback_ran < c3_rollback_ran);
+                    CHECK(c3_rollback_ran < c2_rollback_ran);
+                    CHECK(c2_rollback_ran < c1_rollback_ran);
+                }
+            }
+        }
+    }
+}
+
 SCENARIO("Transaction nesting") {
     GIVEN("A cache with a directory") {
         TestSetup setup;
@@ -1213,8 +1449,126 @@ SCENARIO("Transaction nesting") {
             }
 
             THEN("The file can be released twice after the inner transaction has committed") {
-                txn2.commit();
+                CHECK(txn2.commit());
                 CHECK(txn.release(*d1_r, 2));
+            }
+        }
+
+        WHEN("Adding a rollback hook to a nested transaction") {
+            auto txn = cache.begin_rw();
+            auto txn2 = txn.begin_nested();
+            std::atomic<bool> signal(false);
+            txn2.add_rollback_hook([&signal](){
+                signal = true;
+            });
+            CHECK(!signal);
+
+            AND_WHEN("Aborting the nested transaction") {
+                txn2.abort();
+                THEN("The handler is executed") {
+                    CHECK(signal);
+                }
+
+                AND_WHEN("The parent transaction aborts") {
+                    signal = false;
+                    txn.abort();
+                    THEN("The handler is not executed again") {
+                        CHECK(!signal);
+                    }
+                }
+            }
+
+            AND_WHEN("Comitting the nested transaction") {
+                CHECK(txn2.commit());
+
+                THEN("The handler is not executed") {
+                    CHECK(!signal);
+                }
+
+                AND_WHEN("Comitting the parent transaction") {
+                    CHECK(txn.commit());
+
+                    THEN("The handler is not executed") {
+                        CHECK(!signal);
+                    }
+                }
+
+                AND_WHEN("Aborting the parent transaction") {
+                    txn.abort();
+
+                    THEN("The handler is executed") {
+                        CHECK(signal);
+                    }
+                }
+            }
+        }
+
+        WHEN("Adding a commit handler to a nested transaction") {
+            auto txn = cache.begin_rw();
+            auto txn2 = txn.begin_nested();
+            std::atomic<bool> stage_1_ran(false);
+            std::atomic<bool> stage_2_ran(false);
+            txn2.add_commit_hook([&stage_1_ran](){
+                stage_1_ran = true;
+                return Dragonstash::make_result();
+            }, nullptr, [&stage_2_ran](){
+                stage_2_ran = true;
+            });
+            CHECK(!stage_1_ran);
+            CHECK(!stage_2_ran);
+
+            AND_WHEN("Aborting the nested transaction") {
+                txn2.abort();
+
+                THEN("Neither stage is called") {
+                    CHECK(!stage_1_ran);
+                    CHECK(!stage_2_ran);
+                }
+
+                AND_WHEN("Committing the parent transaction") {
+                    CHECK(txn.commit());
+
+                    THEN("Neither stage is called") {
+                        CHECK(!stage_1_ran);
+                        CHECK(!stage_2_ran);
+                    }
+                }
+
+                AND_WHEN("Aborting the parent transaction") {
+                    txn.abort();
+
+                    THEN("Neither stage is called") {
+                        CHECK(!stage_1_ran);
+                        CHECK(!stage_2_ran);
+                    }
+                }
+            }
+
+            AND_WHEN("Committing the nested transaction") {
+                CHECK(txn2.commit());
+
+                THEN("Neither stage is called") {
+                    CHECK(!stage_1_ran);
+                    CHECK(!stage_2_ran);
+                }
+
+                AND_WHEN("Committing the parent transaction") {
+                    CHECK(txn.commit());
+
+                    THEN("Both stages are called") {
+                        CHECK(stage_1_ran);
+                        CHECK(stage_2_ran);
+                    }
+                }
+
+                AND_WHEN("Aborting the parent transaction") {
+                    txn.abort();
+
+                    THEN("Neither stage is called") {
+                        CHECK(!stage_1_ran);
+                        CHECK(!stage_2_ran);
+                    }
+                }
             }
         }
     }

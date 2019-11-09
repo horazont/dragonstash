@@ -369,7 +369,7 @@ public:
      * A group of functions which may be executed when the transaction commits
      * or aborts.
      */
-    struct CommitHook
+    struct TransactionHook
     {
         /**
          * @brief Executed on commit
@@ -415,7 +415,7 @@ private:
     CacheDatabase *m_db;
     MDBROTransaction m_txn;
     CacheTransactionRW *m_parent;
-    std::vector<CommitHook> m_commit_hooks;
+    std::vector<TransactionHook> m_transaction_hooks;
     std::unique_lock<debug_mutex> m_inode_counter_lock;
 
 protected:
@@ -429,18 +429,26 @@ protected:
         return m_txn.get();
     }
 
-    inline void add_commit_hook(CommitHook &&src)
+public:
+    /**
+     * @brief Add a hook to the transaction.
+     *
+     * The different callbacks of transaction hooks are called during abortion
+     * or commit of a transaction.
+     */
+    template <typename T>
+    inline void add_transaction_hook(T &&src)
     {
-        m_commit_hooks.emplace_back(std::move(src));
+        m_transaction_hooks.emplace_back(std::forward<T>(src));
     }
 
     template <typename T1, typename T2, typename T3, typename T4>
-    inline void add_commit_hook(T1 &&stage_1_commit,
-                                T2 &&stage_1_rollback,
-                                T3 &&stage_2_commit,
-                                T4 &&rollback)
+    inline void add_transaction_hook(T1 &&stage_1_commit,
+                                     T2 &&stage_1_rollback,
+                                     T3 &&stage_2_commit,
+                                     T4 &&rollback)
     {
-        m_commit_hooks.emplace_back(CommitHook{
+        m_transaction_hooks.emplace_back(TransactionHook{
                                         std::forward<T1>(stage_1_commit),
                                         std::forward<T2>(stage_1_rollback),
                                         std::forward<T3>(stage_2_commit),
@@ -448,7 +456,23 @@ protected:
                                     });
     }
 
-public:
+    template <typename T1, typename T2, typename T3>
+    inline void add_commit_hook(T1 &&stage_1_commit,
+                                T2 &&stage_1_rollback,
+                                T3 &&stage_2_commit)
+    {
+        add_transaction_hook(std::forward<T1>(stage_1_commit),
+                             std::forward<T2>(stage_1_rollback),
+                             std::forward<T3>(stage_2_commit),
+                             nullptr);
+    }
+
+    template <typename T1>
+    inline void add_rollback_hook(T1 &&rollback) {
+        add_transaction_hook(nullptr, nullptr, nullptr,
+                             std::forward<T1>(rollback));
+    }
+
     /**
      * @brief Look up the name of an inode in a directory
      * @param parent Number of the parent inode
