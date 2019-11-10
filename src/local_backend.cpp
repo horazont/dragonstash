@@ -92,7 +92,7 @@ LocalDir::LocalDir(DIR *fd):
 
 LocalDir::~LocalDir()
 {
-    if (m_fd >= 0) {
+    if (m_fd) {
         closedir();
     }
 }

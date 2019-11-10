@@ -8,8 +8,7 @@
 
 #include "error.hpp"
 
-namespace Dragonstash {
-namespace Backend {
+namespace Dragonstash::Backend {
 
 struct Stat {
     uint32_t mode;
@@ -66,7 +65,6 @@ public:
 
 };
 
-}
 }
 
 #endif

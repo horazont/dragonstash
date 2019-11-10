@@ -18,12 +18,6 @@
 
 namespace Dragonstash {
 
-enum DataPriority {
-    READAHEAD = 0,
-    REQUESTED = 1,
-    WRITTEN = 2,
-};
-
 class CachedDir {
 public:
     explicit CachedDir(MDBROTransaction &&transaction,

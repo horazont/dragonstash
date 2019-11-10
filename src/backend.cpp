@@ -1,22 +1,11 @@
 #include "backend.hpp"
 
-namespace Dragonstash {
-namespace Backend {
+namespace Dragonstash::Backend {
 
-File::~File()
-{
+File::~File() = default;
 
-}
+Dir::~Dir() = default;
 
-Dir::~Dir()
-{
+Filesystem::~Filesystem() = default;
 
-}
-
-Filesystem::~Filesystem()
-{
-
-}
-
-}
 }
