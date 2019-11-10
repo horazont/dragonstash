@@ -16,6 +16,7 @@ inline Stat from_os_stat(struct stat &src)
     return Stat{
         .mode = src.st_mode,
         .size = static_cast<uint64_t>(src.st_size),
+        .ino = src.st_ino,
         .uid = src.st_uid,
         .gid = src.st_gid,
         .atime = src.st_atim,
@@ -131,6 +132,7 @@ Result<DirEntry> LocalDir::readdir()
     return DirEntry{
         Stat{
             .mode = st_mode,
+            .ino = entry->d_ino,
         },
         .name = entry->d_name,
         .complete = false,
@@ -172,18 +174,18 @@ Result<std::string> LocalFilesystem::map_path(std::string_view s)
     return full_path.native();
 }
 
-std::unique_ptr<File> LocalFilesystem::open(std::string_view path,
-                                            int accesstype,
-                                            mode_t mode)
+Result<std::unique_ptr<File> > LocalFilesystem::open(std::string_view path,
+                                                     int accesstype,
+                                                     mode_t mode)
 {
     const Result<std::string> full_path = map_path(path);
     if (!full_path) {
-        return nullptr;
+        return copy_error(full_path);
     }
 
     int fd = ::open(full_path->c_str(), accesstype, mode);
     if (fd < 0) {
-        return nullptr;
+        return make_result(FAILED, errno);
     }
 
     return std::make_unique<LocalFile>(fd);
@@ -220,6 +222,11 @@ Result<Stat> LocalFilesystem::lstat(std::string_view path)
     }
 
     return from_os_stat(buf);
+}
+
+Result<std::string> LocalFilesystem::readlink(std::string_view path)
+{
+    return make_result(FAILED, EOPNOTSUPP);
 }
 
 }

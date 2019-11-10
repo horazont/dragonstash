@@ -39,6 +39,7 @@ set(DRAGONSTASH_HEADERS
     include/fuse/interface.hpp
     include/fuse/request.hpp
     include/fs.hpp
+    include/in_memory_backend.hpp
     include/local_backend.hpp
     )
 
@@ -52,6 +53,7 @@ set(DRAGONSTASH_SRCS
     src/fuse/buffer.cpp
     src/fuse/interface.cpp
     src/fuse/request.cpp
+    src/in_memory_backend.cpp
     src/local_backend.cpp
     src/fs.cpp)
 
@@ -67,6 +69,7 @@ target_link_libraries(dragonstash libdragonstash)
 
 set(TESTS_SRCS
     tests/main.cpp
+    tests/in_memory_backend.cpp
     tests/cache/cache.cpp
     tests/cache/inode.cpp
     tests/cache/blocklist.cpp

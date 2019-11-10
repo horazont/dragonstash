@@ -14,6 +14,7 @@ namespace Backend {
 struct Stat {
     uint32_t mode;
     uint64_t size;
+    uint64_t ino;
     uint32_t uid;
     uint32_t gid;
     struct timespec atime, mtime, ctime;
@@ -56,11 +57,12 @@ public:
     virtual ~Filesystem();
 
 public:
-    virtual std::unique_ptr<File> open(std::string_view path,
-                                       int accesstype,
-                                       mode_t mode) = 0;
+    virtual Result<std::unique_ptr<File>> open(std::string_view path,
+                                               int accesstype,
+                                               mode_t mode) = 0;
     virtual Result<std::unique_ptr<Dir>> opendir(std::string_view path) = 0;
     virtual Result<Stat> lstat(std::string_view path) = 0;
+    virtual Result<std::string> readlink(std::string_view path) = 0;
 
 };
 

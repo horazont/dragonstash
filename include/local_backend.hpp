@@ -53,11 +53,12 @@ private:
 
     // Filesystem interface
 public:
-    std::unique_ptr<File> open(std::string_view path,
-                               int accesstype,
-                               mode_t mode) override;
-    Result<std::unique_ptr<Dir> > opendir(std::string_view path) override;
-    Result<Stat> lstat(std::string_view path) override;
+    [[nodiscard]] Result<std::unique_ptr<File>> open(std::string_view path,
+                                                     int accesstype,
+                                                     mode_t mode) override;
+    [[nodiscard]] Result<std::unique_ptr<Dir> > opendir(std::string_view path) override;
+    [[nodiscard]] Result<Stat> lstat(std::string_view path) override;
+    [[nodiscard]] Result<std::string> readlink(std::string_view path) override;
 
 };
 
