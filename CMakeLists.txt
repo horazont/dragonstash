@@ -70,7 +70,8 @@ set(TESTS_SRCS
     tests/cache/cache.cpp
     tests/cache/inode.cpp
     tests/cache/blocklist.cpp
-    tests/testutils/tempdir.cpp)
+    tests/testutils/tempdir.cpp
+    tests/testutils/fuse_backend.cpp)
 
 add_executable(dragonstash-tests ${TESTS_SRCS})
 target_link_libraries(dragonstash-tests Catch2 lmdb-safe libdragonstash)
