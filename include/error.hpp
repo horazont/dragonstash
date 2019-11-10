@@ -97,7 +97,7 @@ public:
         return m_errno;
     }
 
-    inline T &get() const {
+    [[nodiscard]] inline T &get() const {
         return &m_value.value();
     }
 
@@ -157,7 +157,7 @@ public:
         return m_ok;
     }
 
-    inline int error() const {
+    [[nodiscard]] inline int error() const {
         return m_errno;
     }
 
@@ -165,23 +165,23 @@ public:
 
 
 template<typename T>
-inline Result<typename std::remove_reference<T>::type> make_result(T &&value)
+[[nodiscard]] inline Result<typename std::remove_reference<T>::type> make_result(T &&value)
 {
     return Result<typename std::remove_reference<T>::type>(std::forward<T>(value));
 }
 
-inline ErrorResultHelper make_result(failed_t, int err)
+[[nodiscard]] inline ErrorResultHelper make_result(failed_t, int err)
 {
     return ErrorResultHelper{err};
 }
 
 template<typename T>
-inline ErrorResultHelper copy_error(const Result<T> &result)
+[[nodiscard]] inline ErrorResultHelper copy_error(const Result<T> &result)
 {
     return ErrorResultHelper{result.error()};
 }
 
-inline Result<void> make_result()
+[[nodiscard]] inline Result<void> make_result()
 {
     return Result<void>();
 }
