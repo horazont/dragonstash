@@ -1,0 +1,18 @@
+language: cpp
+
+os: linux
+dist: bionic
+sudo: required
+
+compiler:
+- gcc
+
+before_install:
+- sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+- sudo apt-get -q update
+- sudo apt-get -y install g++-9 liblmdb-dev libssh-dev python3-pip python3-setuptools ninja-build
+install: ./util/travis-install.sh
+
+script:
+- ./util/travis-build.sh
+- cd build; ./dragonstash-tests
