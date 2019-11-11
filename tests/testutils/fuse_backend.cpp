@@ -164,7 +164,7 @@ TestFuseRequest TestFuseBackend::new_request()
 }
 
 
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 
 // self-tests
 

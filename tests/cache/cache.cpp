@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include <catch.hpp>
+#include <catch2/catch.hpp>
 
 #include <cstdint>
 #include <cstdlib>
@@ -1157,7 +1157,7 @@ SCENARIO("Read-committed isolation level for locks") {
                     // for mutex ownership, but only if compiled without NDEBUG
                     // The deadlock_detection flag indicates if the mutex used
                     // by libdragonstash was compiled without NDEBUG.
-                    CHECK_THROWS_AS(r1.lock(*r_lookup_result), std::system_error&);
+                    CHECK_THROWS_AS(r1.lock(*r_lookup_result), std::system_error);
                 }
             }
         }
