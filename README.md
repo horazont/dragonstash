@@ -1,6 +1,6 @@
 # DragonStash -- a Caching FUSE Overlay File System
 
-[![Travis CI build badge](https://api.travis-ci.org/horazont/dragonstash.svg?branch=master)](https://travis-ci.org/horazont/dragonstash)
+[![Travis CI build badge](https://api.travis-ci.com/horazont/dragonstash.svg?branch=master)](https://travis-ci.com/horazont/dragonstash)
 
 `DragonStash` is a FUSE file system which implements a *transparent cache*
 over any other mounted file system or SFTP server. It helps you produce a
