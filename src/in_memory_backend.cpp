@@ -216,7 +216,7 @@ Result<ssize_t> FileHandle::pread(void *buf, size_t count, off_t offset)
         return make_result(FAILED, EINVAL);
     }
     auto &data = m_file->data();
-    if (offset >= data.size()) {
+    if (static_cast<size_t>(offset) >= data.size()) {
         return 0;
     }
     const std::size_t end_offset = offset + count;

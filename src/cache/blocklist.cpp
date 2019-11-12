@@ -224,12 +224,16 @@ Blocklist::File::iterator Blocklist::delete_range(Blocklist::File::iterator begi
     const auto deleted = end - begin;
     const auto to_move = m_mapping->end() - end;
 
+    assert(deleted >= 0);
+    assert(to_move >= 0);
+
     /* std::cout << "delete: index=" << index
               << ", deleted=" << deleted
               << ", to_move=" << to_move
               << "; nentries=" << m_mapping->superblock.entries << std::endl; */
 
-    assert(to_move + deleted <= m_mapping->superblock.entries);
+    assert(static_cast<unsigned>(to_move) +
+           static_cast<unsigned>(deleted) <= m_mapping->superblock.entries);
 
     // update block bookkeeping
     for (auto iter = begin; iter != end; ++iter) {

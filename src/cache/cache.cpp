@@ -436,6 +436,7 @@ Result<std::string> CacheTransactionRO::name(ino_t parent, ino_t ino)
     if (int rc = cursor.find(key, key_out, value) == MDB_NOTFOUND) {
         // should this be possible? on deletion, we should normally unset the
         // parent...
+        (void)rc;
         return make_result(FAILED, ENOENT);
     }
 
@@ -468,6 +469,7 @@ Result<ino_t> CacheTransactionRO::parent(ino_t ino)
 
     MDBOutVal value{};
     if (int rc = ro_transaction()->get(db().inodes_db(), ino, value) == MDB_NOTFOUND) {
+        (void)rc;
         return make_result(FAILED, ENOENT);
     }
 
@@ -958,7 +960,7 @@ Result<void> CacheTransactionRW::clean_orphans()
                     {
                         // orphan all child entries of this directory
                         auto dir_cursor = rw_transaction()->getCursor(db().tree_inode_key_db());
-                        while (int rc = dir_cursor.lower_bound(ino, key_out, value_out) == 0) {
+                        while (dir_cursor.lower_bound(ino, key_out, value_out) == 0) {
                             ino_t found_parent_ino;
                             memcpy(&found_parent_ino, key_out.d_mdbval.mv_data, sizeof(ino_t));
                             if (found_parent_ino != ino) {

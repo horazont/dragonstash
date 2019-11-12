@@ -61,9 +61,11 @@ add_library(libdragonstash STATIC ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
 target_link_libraries(libdragonstash PkgConfig::FUSE3)
 target_link_libraries(libdragonstash lmdb-safe)
 target_include_directories(libdragonstash PUBLIC include)
+target_compile_options(libdragonstash PRIVATE -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
 
 add_executable(dragonstash src/main.cpp)
 target_link_libraries(dragonstash libdragonstash)
+target_compile_options(dragonstash PRIVATE -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
 
 # UNIT TESTS
 
