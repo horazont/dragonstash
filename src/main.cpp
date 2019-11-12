@@ -180,9 +180,9 @@ int main(int argc, char **argv) {
     {
         const std::filesystem::path cache_path = "./cache";
         const std::filesystem::path src_path = "/home/horazont/noram-tmp";
-        auto local = std::make_unique<Dragonstash::Backend::LocalFilesystem>(src_path);
-        Dragonstash::Filesystem fs(std::make_unique<Dragonstash::Cache>(cache_path));
-        fs.reset_backend_fs(std::move(local));
+        Dragonstash::Backend::LocalFilesystem backend(src_path);
+        Dragonstash::Cache cache(cache_path);
+        Dragonstash::Filesystem fs(cache, backend);
         try {
             Fuse::Session<Dragonstash::Filesystem> session(fs, &args);
             if (session.set_signal_handlers() != 0) {
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
 
             fuse_daemonize(opts.foreground);
 
-            if (opts.singlethread) {
+            if (opts.singlethread && false) {
                 ret = !session.loop();
             } else {
                 ret = !session.loop_mt(opts.clone_fd);

@@ -28,50 +28,41 @@ authors named in the AUTHORS file.
 
 namespace Dragonstash {
 
-Filesystem::Filesystem(std::unique_ptr<Cache> &&cache):
-    m_cache(std::move(cache))
+Filesystem::Filesystem(Cache &cache, Backend::Filesystem &backend):
+    m_cache(cache),
+    m_backend_fs(backend)
 {
 
-}
-
-std::unique_ptr<Backend::Filesystem> Filesystem::reset_backend_fs(std::unique_ptr<Backend::Filesystem> &&backend)
-{
-    std::unique_ptr<Backend::Filesystem> tmp = std::move(backend);
-    std::swap(tmp, m_backend_fs);
-    return tmp;
 }
 
 void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view name)
 {
-    auto txn = m_cache->begin_rw();
+    auto txn = m_cache.begin_rw();
 
     Result<ino_t> ino_result = make_result(FAILED, -EOPNOTSUPP);
     struct fuse_entry_param e{};
     e.attr_timeout = 1.0;
     e.entry_timeout = 1.0;
 
-    if (m_backend_fs) {
-        auto path_result = txn.path(parent);
-        if (!path_result) {
-            req.reply_err(path_result.error());
-            return;
-        }
+    auto path_result = txn.path(parent);
+    if (!path_result) {
+        req.reply_err(path_result.error());
+        return;
+    }
 
-        std::string backend_path = *path_result;
-        backend_path.reserve(backend_path.size() + name.size() + 1);
-        if (path_result->size() > 1) {
-            backend_path += '/';
-        }
-        backend_path += name;
-        std::string_view backend_path_view(backend_path);
-        // remove leading slash because the backend FS won’t like it
-        backend_path_view.remove_prefix(1);
+    std::string backend_path = *path_result;
+    backend_path.reserve(backend_path.size() + name.size() + 1);
+    backend_path += '/';
+    backend_path += name;
+    std::string_view backend_path_view(backend_path);
 
-        auto stat_result = m_backend_fs->lstat(backend_path_view);
-        if (!stat_result) {
-            req.reply_err(stat_result.error());
-            return;
-        }
+    auto stat_result = m_backend_fs.lstat(backend_path_view);
+    if (!stat_result && stat_result.error() != ENOTCONN) {
+        req.reply_err(stat_result.error());
+        return;
+    }
+
+    if (stat_result) {
         auto cache_attrs = Inode::from_backend_stat(*stat_result);
 
         ino_result = txn.emplace(parent, name, cache_attrs);
@@ -85,15 +76,31 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
             .ino = *ino_result
         };
     } else {
+        // backend not connected, retrieve from cache if available
         ino_result = txn.lookup(parent, name);
-
-        auto stat_result = txn.getattr(*ino_result);
-        if (!stat_result) {
-            req.reply_err(stat_result.error());
+        if (!ino_result) {
+            if (ino_result.error() == ENOENT) {
+                // XXX: This is a tricky one, because we currently do not know
+                // whether the entry is currently not in the cache (e.g. because
+                // the parent has never been opendir()'d) or whether the entry
+                // truly does not exist on the remote.
+                // we return ENOENT for now, but we might want to return either
+                // ENOTCONN or EIO later on. Also, we might want negative
+                // caching / a flag on a directory indicating that it has been
+                // full-sync’d in opendir once.
+            }
+            req.reply_err(ino_result.error());
             return;
         }
 
-        e.attr = *stat_result;
+        auto attr_result = txn.getattr(*ino_result);
+        if (!attr_result) {
+            // return EIO, because this is not supposed to even happen...
+            req.reply_err(EIO);
+            return;
+        }
+
+        e.attr = *attr_result;
     }
 
     auto lock_result = txn.lock(*ino_result);
@@ -113,18 +120,19 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
 
 void Filesystem::forget(Fuse::Request &&req, fuse_ino_t ino, uint64_t nlookup)
 {
-    auto txn = m_cache->begin_ro();
+    auto txn = m_cache.begin_ro();
     auto release_result = txn.release(ino, nlookup);
     if (!release_result) {
         req.reply_err(release_result.error());
         return;
     }
     (void)txn.commit();
+    req.reply_none();
 }
 
 void Filesystem::getattr(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi)
 {
-    auto txn = m_cache->begin_ro();
+    auto txn = m_cache.begin_ro();
     auto getattr_result = txn.getattr(ino);
     if (!getattr_result) {
         req.reply_err(getattr_result.error());
@@ -137,24 +145,40 @@ void Filesystem::getattr(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
 
 void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi)
 {
-    auto txn = m_cache->begin_rw();
+    auto txn = m_cache.begin_rw();
     auto path_result = txn.path(ino);
     if (!path_result) {
         req.reply_err(path_result.error());
         return;
     }
+    std::string_view backend_path;
 
-    std::string_view backend_path(*path_result);
-    backend_path.remove_prefix(1);
+    if (path_result->empty()) {
+        backend_path = "/";
+    } else {
+        backend_path = *path_result;
+    }
 
-    auto dir = m_backend_fs->opendir(backend_path);
+    auto dir = m_backend_fs.opendir(backend_path);
     if (!dir) {
         req.reply_err(dir.error());
         return;
     }
 
     while (auto entry = (*dir)->readdir()) {
-        (void)txn.emplace(ino, entry->name, Inode::from_backend_stat(*entry));
+        std::string entry_path(backend_path);
+        entry_path.reserve(entry_path.size() + entry->name.size() + 1);
+        if (entry_path.size() > 1) {
+            // need to add a slash to the end
+            entry_path += '/';
+        }
+        entry_path += entry->name;
+        auto stat_result = m_backend_fs.lstat(entry_path);
+        if (!stat_result) {
+            continue;
+        }
+        const auto info = Inode::from_backend_stat(*stat_result);
+        (void)txn.emplace(ino, entry->name, info);
     }
 
     fi->fh = 0;
@@ -173,7 +197,7 @@ void Filesystem::readdir(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t
     int error = 0;
     off_t cursor = off;
     std::size_t to_send = 0;
-    auto txn = m_cache->begin_ro();
+    auto txn = m_cache.begin_ro();
     while (buffer.length() < size) {
         to_send = buffer.length();
 
@@ -218,7 +242,7 @@ void Filesystem::readdirplus(Fuse::Request &&req, fuse_ino_t ino, size_t size, o
     int error = 0;
     off_t cursor = off;
     std::size_t to_send = 0;
-    auto txn = m_cache->begin_ro();
+    auto txn = m_cache.begin_ro();
     while (buffer.length() < size) {
         to_send = buffer.length();
 
@@ -280,7 +304,7 @@ void Filesystem::readdirplus(Fuse::Request &&req, fuse_ino_t ino, size_t size, o
 
 void Filesystem::forget_multi(Fuse::Request &&req, size_t count, fuse_forget_data *forgets)
 {
-    auto txn = m_cache->begin_ro();
+    auto txn = m_cache.begin_ro();
     for (std::size_t i = 0; i < count; ++i) {
         (void)txn.release(forgets[i].ino, forgets[i].nlookup);
     }

@@ -38,16 +38,13 @@ class Filesystem: public Fuse::Interface
 {
 public:
     Filesystem() = delete;
-    explicit Filesystem(std::unique_ptr<Cache> &&cache);
+    explicit Filesystem(Cache &cache, Backend::Filesystem &backend);
 
 private:
-    std::unique_ptr<Cache> m_cache;
-    std::unique_ptr<Backend::Filesystem> m_backend_fs;
+    Cache &m_cache;
+    Backend::Filesystem &m_backend_fs;
 
     Result<std::string> get_backend_path(CacheTransactionRO &txn, ino_t ino);
-
-public:
-    std::unique_ptr<Backend::Filesystem> reset_backend_fs(std::unique_ptr<Backend::Filesystem> &&backend);
 
 public:
     void lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view name);

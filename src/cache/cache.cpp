@@ -640,6 +640,10 @@ Result<DirectoryEntry> CacheTransactionRO::readdir(ino_t dir, ino_t prev_end)
 
 Result<std::string> CacheTransactionRO::path(ino_t ino)
 {
+    if (ino == Dragonstash::ROOT_INO) {
+        return "";
+    }
+
     std::string buf;
     do {
         auto parent_result = parent(ino);
@@ -699,7 +703,7 @@ Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
 void CacheTransactionRO::abort()
 {
     // two separate loops here to ensure that all stage 1 rollback callbacks
-    // run before all transaction rollback callbacks
+    // run before all main
     for (auto iter = m_transaction_hooks.rbegin();
          iter != m_transaction_hooks.rend();
          ++iter)

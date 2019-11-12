@@ -40,6 +40,13 @@ Node::Node(const Stat &attr):
 
 }
 
+void Node::update_attr(const Stat &new_attr)
+{
+    auto mode_backup = m_attr.mode;
+    m_attr = new_attr;
+    m_attr.mode = (mode_backup & S_IFMT) | (m_attr.mode & ~S_IFMT);
+}
+
 Result<Node *> Node::find(std::string_view)
 {
     return make_result(FAILED, ENOTDIR);
@@ -247,8 +254,17 @@ Result<void> FileHandle::close()
 
 }
 
+void InMemoryFilesystem::set_connected(bool connected)
+{
+    m_connected = connected;
+}
+
 Result<std::unique_ptr<File> > InMemoryFilesystem::open(std::string_view path, int accesstype, mode_t mode)
 {
+    if (!m_connected) {
+        return make_result(FAILED, ENOTCONN);
+    }
+
     Result<InMemory::Node*> node = find(path);
     if (!node) {
         return copy_error(node);
@@ -268,6 +284,10 @@ Result<std::unique_ptr<File> > InMemoryFilesystem::open(std::string_view path, i
 
 Result<std::unique_ptr<Dir> > InMemoryFilesystem::opendir(std::string_view path)
 {
+    if (!m_connected) {
+        return make_result(FAILED, ENOTCONN);
+    }
+
     Result<InMemory::Node*> node = find(path);
     if (!node) {
         return copy_error(node);
@@ -281,6 +301,10 @@ Result<std::unique_ptr<Dir> > InMemoryFilesystem::opendir(std::string_view path)
 
 Result<Stat> InMemoryFilesystem::lstat(std::string_view path)
 {
+    if (!m_connected) {
+        return make_result(FAILED, ENOTCONN);
+    }
+
     Result<InMemory::Node*> node = find(path);
     if (!node) {
         return copy_error(node);
@@ -290,6 +314,10 @@ Result<Stat> InMemoryFilesystem::lstat(std::string_view path)
 
 Result<std::string> InMemoryFilesystem::readlink(std::string_view path)
 {
+    if (!m_connected) {
+        return make_result(FAILED, ENOTCONN);
+    }
+
     Result<InMemory::Node*> node = find(path);
     if (!node) {
         return copy_error(node);

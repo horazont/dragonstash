@@ -72,6 +72,10 @@ private:
 
 public:
     inline operator Fuse::Request() {
+        return wrap();
+    }
+
+    [[nodiscard]] inline Fuse::Request wrap() {
         return Fuse::Request(reinterpret_cast<fuse_req_t>(this));
     }
 

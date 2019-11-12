@@ -70,6 +70,7 @@ target_link_libraries(dragonstash libdragonstash)
 set(TESTS_SRCS
     tests/main.cpp
     tests/in_memory_backend.cpp
+    tests/fs.cpp
     tests/cache/cache.cpp
     tests/cache/inode.cpp
     tests/cache/blocklist.cpp

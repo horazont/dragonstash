@@ -967,10 +967,10 @@ SCENARIO("Path reconstruction") {
         WHEN("Reconstructing path of the root inode") {
             auto path = cache.path(Dragonstash::ROOT_INO);
 
-            THEN("It should succeed and be /") {
+            THEN("It should succeed and be empty") {
                 CHECK(path.error() == 0);
                 REQUIRE(path);
-                CHECK(*path == "/");
+                CHECK(path->empty());
             }
         }
 

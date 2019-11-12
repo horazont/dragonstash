@@ -53,6 +53,8 @@ public:
         return m_attr;
     }
 
+    void update_attr(const Stat &new_attr);
+
     virtual Result<Node*> find(std::string_view path);
 
 };
@@ -174,6 +176,16 @@ public:
 }
 
 class InMemoryFilesystem: public Filesystem, public InMemory::Directory {
+private:
+    bool m_connected{true};
+
+public:
+    [[nodiscard]] inline bool connected() const {
+        return m_connected;
+    }
+
+    void set_connected(bool connected);
+
     // Filesystem interface
 public:
     [[nodiscard]] Result<std::unique_ptr<File> > open(std::string_view path, int accesstype, mode_t mode) override;

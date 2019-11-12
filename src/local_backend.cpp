@@ -188,9 +188,16 @@ LocalFilesystem::LocalFilesystem(const std::filesystem::path &root):
 
 Result<std::string> LocalFilesystem::map_path(std::string_view s)
 {
+    if (s.empty()) {
+        return make_result(FAILED, EINVAL);
+    }
+    if (s[0] != '/') {
+        return make_result(FAILED, EINVAL);
+    }
+    s.remove_prefix(1);
     std::filesystem::path inner(s);
     if (!inner.is_relative()) {
-        return Result<std::string>(FAILED, EINVAL);
+        return make_result(FAILED, EINVAL);
     }
 
     std::filesystem::path full_path(m_root);
