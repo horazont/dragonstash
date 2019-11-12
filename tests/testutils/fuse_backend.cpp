@@ -40,7 +40,7 @@ static const fuse_ctx *dummy_req_ctx(fuse_req_t)
     return nullptr;
 }
 
-static void not_implemented()
+[[noreturn]] static void not_implemented()
 {
     throw std::runtime_error("not implemented");
 }
