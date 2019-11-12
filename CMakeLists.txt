@@ -24,6 +24,10 @@ target_include_directories(lmdb-safe PUBLIC ${LMDB_SAFE_DIR})
 
 add_subdirectory(Catch2)
 
+## SUBMODULE: CLI11
+
+add_subdirectory(CLI11)
+
 # MAIN THING
 
 set(DRAGONSTASH_HEADERS
@@ -65,6 +69,7 @@ target_compile_options(libdragonstash PRIVATE -Wall -Wno-missing-field-initializ
 
 add_executable(dragonstash src/main.cpp)
 target_link_libraries(dragonstash libdragonstash)
+target_link_libraries(dragonstash CLI11)
 target_compile_options(dragonstash PRIVATE -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
 
 # UNIT TESTS

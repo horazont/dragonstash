@@ -31,74 +31,114 @@ authors named in the AUTHORS file.
 #include <cstring>
 
 #include "local_backend.hpp"
+#include "in_memory_backend.hpp"
+
+#include "CLI/CLI.hpp"
+
+class MountCommand
+{
+public:
+    explicit MountCommand(CLI::App &app):
+        m_cmd(*app.add_subcommand("mount", "Mount a dragonstash cache"))
+    {
+
+        auto &backend_group = *m_cmd.add_option_group("Backend");
+        backend_group.require_option(1, 1);
+        backend_group.add_flag("-N,--disconnected", "Mount without backend");
+        backend_group.add_option("-L,--local", m_local_path, "Use a local directory as backend.")->type_name("PATH");
+        backend_group.add_flag("-S,--sshfs,--sftp", m_sshfs_url, "Use libssh to connect to a server as backend.")->type_name("URL");
+
+        m_cmd.add_flag("-d,--debug", "Enable FUSE debug output (implies -f)");
+        m_cmd.add_flag("-f,--foreground", "Stay in foreground");
+
+        m_cmd.add_option("cachedir", m_cachedir, "Path to the cache directory")->mandatory()->type_name("PATH");
+        m_cmd.add_option("mountpoint", m_mountpoint, "Path to the mountpoint")->mandatory()->type_name("PATH");
+    }
+
+private:
+    CLI::App &m_cmd;
+
+    std::string m_cachedir;
+    std::string m_mountpoint;
+    std::string m_local_path;
+    std::string m_sshfs_url;
+
+public:
+    int execute() {
+        const bool debug = m_cmd.count("-d");
+        const bool foreground = debug || m_cmd.count("-f");
+        const bool clone_fd = true;
+
+        std::unique_ptr<Dragonstash::Backend::Filesystem> backend;
+        if (m_cmd.count("--disconnected")) {
+            auto in_memory = std::make_unique<Dragonstash::Backend::InMemoryFilesystem>();
+            in_memory->set_connected(false);
+            backend = std::move(in_memory);
+        } else if (m_cmd.count("--local")) {
+            backend = std::make_unique<Dragonstash::Backend::LocalFilesystem>(std::filesystem::path(m_local_path));
+        }
+        Dragonstash::Cache cache(m_cachedir);
+        Dragonstash::Filesystem fs(cache, *backend);
+
+        // construct an argv array to trick fuse into setting the right options
+        // ... this is a bit hacky, but it does what's needed.
+        std::vector<std::string> shadow_argv;
+        shadow_argv.emplace_back("\0", 1);
+        if (debug) {
+            shadow_argv.emplace_back("-d");
+        }
+
+        std::vector<char*> argv;
+        argv.reserve(shadow_argv.size());
+        for (auto &s: shadow_argv) {
+            argv.push_back(s.data());
+        }
+
+        struct fuse_args args{static_cast<int>(argv.size()), argv.data(), 0};
+
+        int ret = 255;
+        Fuse::Session<Dragonstash::Filesystem> session(fs, &args);
+
+        if (session.set_signal_handlers() != 0) {
+            std::cerr << "failed to set signal handlers" << std::endl;
+            ret = 1;
+            goto exit;
+        }
+
+        if (session.mount(m_mountpoint.c_str()) != 0) {
+            std::cerr << "failed to mount" << std::endl;
+            ret = 1;
+            goto cleanup_signal;
+        }
+
+        fuse_daemonize(foreground);
+
+        ret = !session.loop_mt(clone_fd);
+
+        session.unmount();
+
+cleanup_signal:
+        session.remove_signal_handlers();
+exit:
+        return ret;
+    }
+
+    explicit operator bool() const {
+        return bool(m_cmd);
+    }
+
+};
+
 
 int main(int argc, char **argv) {
-    struct fuse_args args = FUSE_ARGS_INIT(argc, argv);
-    struct fuse_cmdline_opts opts;
+    CLI::App app{"Dragonstash"};
 
-    int ret = 1;
-    if (fuse_parse_cmdline(&args, &opts) != 0)
-            return 1;
-    if (opts.show_help) {
-            printf("usage: %s [options] <mountpoint>\n\n", argv[0]);
-            fuse_cmdline_help();
-            fuse_lowlevel_help();
-            ret = 0;
-            goto err_out1;
-    } else if (opts.show_version) {
-            printf("FUSE library version %s\n", fuse_pkgversion());
-            fuse_lowlevel_version();
-            ret = 0;
-            goto err_out1;
+    MountCommand mount(app);
+
+    CLI11_PARSE(app, argc, argv);
+
+    if (mount) {
+        mount.execute();
     }
-
-    if(opts.mountpoint == NULL) {
-            printf("usage: %s [options] <mountpoint>\n", argv[0]);
-            printf("       %s --help\n", argv[0]);
-            ret = 1;
-            goto err_out1;
-    }
-
-    {
-        const std::filesystem::path cache_path = "./cache";
-        const std::filesystem::path src_path = "/home/horazont/noram-tmp";
-        Dragonstash::Backend::LocalFilesystem backend(src_path);
-        Dragonstash::Cache cache(cache_path);
-        Dragonstash::Filesystem fs(cache, backend);
-        try {
-            Fuse::Session<Dragonstash::Filesystem> session(fs, &args);
-            if (session.set_signal_handlers() != 0) {
-                std::cerr << "failed to set signal handlers" << std::endl;
-                ret = 1;
-                goto err_out2;
-            }
-
-            if (session.mount(opts.mountpoint) != 0) {
-                std::cerr << "failed to mount" << std::endl;
-                ret = 1;
-                goto err_out3;
-            }
-
-            fuse_daemonize(opts.foreground);
-
-            if (opts.singlethread && false) {
-                ret = !session.loop();
-            } else {
-                ret = !session.loop_mt(opts.clone_fd);
-            }
-
-            session.unmount();
-err_out3:
-            session.remove_signal_handlers();
-err_out2:
-            ;
-        } catch (std::runtime_error &exc) {
-            std::cerr << "failed to set up session" << std::endl;
-        }
-    }
-
-err_out1:
-    fuse_opt_free_args(&args);
-
-    return ret;
+    return 0;
 }
