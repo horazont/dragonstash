@@ -47,7 +47,7 @@ public:
             m_blocklist.fsck();
         } catch (std::runtime_error &err) {
             m_blocklist.dump(std::cerr);
-            throw;
+            std::unexpected();
         }
     }
 
