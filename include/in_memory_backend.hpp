@@ -147,6 +147,8 @@ public:
 
     Result<Node*> find(std::string_view path) override;
 
+    void remove(const std::string &name);
+
 };
 
 class DirHandle: public Dragonstash::Backend::Dir {

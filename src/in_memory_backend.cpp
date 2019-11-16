@@ -118,7 +118,7 @@ Result<Node*> Directory::find(std::string_view path)
     } else if (next_slash == 0) {
         return make_result(FAILED, EINVAL);
     } else {
-        child_name = path.substr(0, next_slash-1);
+        child_name = path.substr(0, next_slash);
         remainder = path.substr(next_slash);
         assert(!remainder.empty());
         assert(remainder[0] == '/');
@@ -134,6 +134,16 @@ Result<Node*> Directory::find(std::string_view path)
     }
 
     return child_node_iter->second->find(remainder);
+}
+
+void Directory::remove(const std::string &name)
+{
+    auto iter = m_children.find(name);
+    if (iter == m_children.end()) {
+        return;
+    }
+
+    m_children.erase(iter);
 }
 
 DirHandle::DirHandle(Directory &node):

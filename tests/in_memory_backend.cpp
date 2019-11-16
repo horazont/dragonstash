@@ -91,6 +91,20 @@ SCENARIO("Node construction and basic operations") {
                 REQUIRE(!open_result);
             }
         }
+
+        AND_WHEN("Adding a nested file") {
+            auto dir_raw = fs.find("/foo");
+            REQUIRE(dir_raw);
+            auto &dir = *dynamic_cast<InMemory::Directory*>(*dir_raw);
+
+            dir.emplace<InMemory::File>("f1");
+
+            THEN("Calling lstat on the nested file succeods") {
+                auto result = fs.lstat("/foo/f1");
+                CHECK(result.error() == 0);
+                CHECK(result);
+            }
+        }
     }
 
     GIVEN("A file at /foo") {
@@ -476,6 +490,79 @@ SCENARIO("File I/O") {
                           &read_data[4]);
 
                 CHECK(read_data == buf);
+            }
+        }
+    }
+}
+
+SCENARIO("Entry removal") {
+    GIVEN("A fs with a directory and two files") {
+        InMemoryFilesystem fs;
+        fs.emplace<InMemory::File>("f1");
+        fs.emplace<InMemory::Directory>("dir").emplace<InMemory::File>("f2");
+
+        WHEN("Removing the directory") {
+            fs.remove("dir");
+
+            THEN("lstat on it fails with ENOENT") {
+                auto result = fs.lstat("/dir");
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+
+            THEN("lstat on its contents fails with ENOENT") {
+                auto result = fs.lstat("/dir/f2");
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+
+            THEN("Attempting to opendir it fails with ENOENT") {
+                auto result = fs.opendir("/dir");
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+
+            AND_WHEN("lstat on the intact file") {
+                auto result = fs.lstat("/f1");
+
+                THEN("It succeds") {
+                    CHECK(result.error() == 0);
+                    CHECK(result);
+                }
+            }
+        }
+
+        WHEN("Removing the file") {
+            fs.remove("f1");
+
+            THEN("lstat on it fails with ENOENT") {
+                auto result = fs.lstat("/f1");
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+
+            THEN("Attempting to open it fails with ENOENT") {
+                auto result = fs.open("/f1", O_RDWR, 0);
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+
+            AND_WHEN("lstat on the intact directory") {
+                auto result = fs.lstat("/dir");
+
+                THEN("It succeds") {
+                    CHECK(result.error() == 0);
+                    CHECK(result);
+                }
+            }
+
+            AND_WHEN("lstat on the intact file") {
+                auto result = fs.lstat("/dir/f2");
+
+                THEN("It succeds") {
+                    CHECK(result.error() == 0);
+                    CHECK(result);
+                }
             }
         }
     }
