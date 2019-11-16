@@ -29,6 +29,8 @@ authors named in the AUTHORS file.
 #include <unistd.h>
 #include <ctime>
 
+#include "cache/direntry.hpp"
+
 /**
  * LMDB database layout
  *
@@ -79,21 +81,23 @@ T safe_dec(T &value, T by = 1)
 }
 
 
+static inline std::basic_string_view<std::byte> view(const MDBOutVal &val)
+{
+    return std::basic_string_view<std::byte>(
+                reinterpret_cast<std::byte*>(val.d_mdbval.mv_data),
+                val.d_mdbval.mv_size);
+}
+
+
 static inline Result<Inode> inode_from_lmdb(const MDBOutVal &val)
 {
-    return Inode::parse(std::basic_string_view<std::byte>(
-                            reinterpret_cast<std::byte*>(val.d_mdbval.mv_data),
-                            val.d_mdbval.mv_size
-                            ));
+    return Inode::parse(view(val));
 }
 
 
 static inline Result<copyfree_wrap<Inode>> inode_from_lmdb_inplace(const MDBOutVal &val)
 {
-    return Inode::parse_inplace(std::basic_string_view<std::byte>(
-                            reinterpret_cast<std::byte*>(val.d_mdbval.mv_data),
-                            val.d_mdbval.mv_size
-                            ));
+    return Inode::parse_inplace(view(val));
 }
 
 
@@ -448,9 +452,11 @@ Result<std::string> CacheTransactionRO::name(ino_t parent, ino_t ino)
         return make_result(FAILED, ENOENT);
     }
 
-    std::string name(reinterpret_cast<char*>(value.d_mdbval.mv_data),
-                     value.d_mdbval.mv_size);
-    return make_result(name);
+    auto parse_result = DirEntry::parse(view(value));
+    if (!parse_result) {
+        return copy_error(parse_result);
+    }
+    return make_result(std::get<1>(*parse_result));
 }
 
 Result<std::string> CacheTransactionRO::name(ino_t ino)
@@ -512,7 +518,8 @@ Result<ino_t> CacheTransactionRO::lookup(ino_t parent, std::string_view name)
          rc = cursor.nextprev(key_out, value_out, MDB_NEXT))
     {
         assert(key_out.d_mdbval.mv_size >= sizeof(ino_t));
-        assert(value_out.d_mdbval.mv_size == sizeof(ino_t));
+        auto parse_result = DirEntry::parse_inplace(view(value_out));
+        assert(parse_result);
 
         const size_t name_length = key_out.d_mdbval.mv_size - sizeof(ino_t);
         if (name_length != name.length()) {
@@ -526,7 +533,7 @@ Result<ino_t> CacheTransactionRO::lookup(ino_t parent, std::string_view name)
             break;
         }
 
-        auto entry_child_ino = value_out.get<ino_t>();
+        auto entry_child_ino = std::get<0>(*parse_result)->entry_ino;
         std::string_view entry_name(reinterpret_cast<char*>(key_out.d_mdbval.mv_data),
                                     key_out.d_mdbval.mv_size);
         entry_name.remove_prefix(sizeof(ino_t));
@@ -637,13 +644,15 @@ Result<DirectoryEntry> CacheTransactionRO::readdir(ino_t dir, ino_t prev_end)
         }
     }
 
-    std::string_view entry_name(reinterpret_cast<char*>(value_out.d_mdbval.mv_data),
-                                value_out.d_mdbval.mv_size);
+    auto parse_result = DirEntry::parse(view(value_out));
+    if (!parse_result) {
+        return make_result(FAILED, EIO);
+    }
     return make_result(DirectoryEntry{
                            Stat{
                                .ino = key[1],
                            },
-                           std::string(entry_name),
+                           std::string(std::get<1>(*parse_result)),
                            false,
                        });
 }
@@ -847,8 +856,9 @@ Result<void> CacheTransactionRW::make_orphan(ino_t ino)
         if (ino_cursor.find(key, key_out, value_out) == MDB_NOTFOUND) {
             return make_result(FAILED, EIO);
         }
-        std::string_view name(reinterpret_cast<char*>(value_out.d_mdbval.mv_data),
-                              value_out.d_mdbval.mv_size);
+        auto direntry_result = DirEntry::parse(view(value_out));
+        assert(direntry_result);
+        std::string_view name = std::get<1>(*direntry_result);
         key.resize(sizeof(ino_t) + name.length());
         memcpy(&key[sizeof(ino_t)], name.data(), name.length());
         ino_cursor.del();
@@ -902,7 +912,12 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         MDBOutVal key_out{};
         MDBOutVal value_out{};
         if (name_cursor.find(key, key_out, value_out) != MDB_NOTFOUND) {
-            const auto old_ino = value_out.get<ino_t>();
+            ino_t old_ino;
+            {
+                auto parse_result = DirEntry::parse_inplace(view(value_out));
+                assert(parse_result);
+                old_ino = std::get<0>(*parse_result)->entry_ino;
+            }
             // now we have to check whether the format differs
             auto ino_cursor = rw_transaction()->getRWCursor(db().inodes_db());
             assert(ino_cursor.find(old_ino, key_out, value_out) == 0);
@@ -929,22 +944,32 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         rw_transaction()->put(db().inodes_db(), key, buf);
     }
 
-    // write directory entry pair
+    std::basic_string<std::byte> direntry_buffer;
     {
-        std::vector<std::uint8_t> buf;
-        buf.resize(sizeof(ino_t) + name.length());
-        memcpy(&buf[0], &parent, sizeof(ino_t));
-        memcpy(&buf[sizeof(ino_t)], name.data(), name.length());
-        std::string_view key(reinterpret_cast<char*>(buf.data()), buf.size());
-        rw_transaction()->put(db().tree_name_key_db(), key, ino);
+        DirEntry *entry;
+        char *name_ptr;
+        std::tie(entry, name_ptr) = Dragonstash::emplace(direntry_buffer, name.length(), ino);
+        memcpy(name_ptr, name.data(), name.length());
+    }
+    std::string_view direntry_view(reinterpret_cast<char*>(direntry_buffer.data()),
+                                   direntry_buffer.size());
+
+    // write directory entry pair
+    std::basic_string<std::byte> key_buf;
+    {
+        key_buf.resize(sizeof(ino_t) + name.length());
+        memcpy(&key_buf[0], &parent, sizeof(ino_t));
+        memcpy(&key_buf[sizeof(ino_t)], name.data(), name.length());
+        std::string_view key(reinterpret_cast<char*>(key_buf.data()), key_buf.size());
+        rw_transaction()->put(db().tree_name_key_db(), key, direntry_view);
     }
 
     {
-        std::array<char, sizeof(ino_t)*2> key_buf{};
+        key_buf.resize(sizeof(ino_t)*2);
         memcpy(&key_buf[0], &parent, sizeof(ino_t));
         memcpy(&key_buf[sizeof(ino_t)], &ino, sizeof(ino_t));
-        std::string_view key(key_buf.data(), key_buf.size());
-        rw_transaction()->put(db().tree_inode_key_db(), key, name);
+        std::string_view key(reinterpret_cast<char*>(key_buf.data()), key_buf.size());
+        rw_transaction()->put(db().tree_inode_key_db(), key, direntry_view);
     }
 
     (void)clean_orphans();
@@ -1000,8 +1025,9 @@ Result<void> CacheTransactionRW::clean_orphans()
                                 break;
                             }
 
-                            ino_t found_child_ino;
-                            memcpy(&found_child_ino, &reinterpret_cast<std::uint8_t*>(key_out.d_mdbval.mv_data)[sizeof(ino_t)], sizeof(ino_t));
+                            auto direntry_result = DirEntry::parse(view(value_out));
+                            assert(direntry_result);
+                            const ino_t found_child_ino = std::get<0>(*direntry_result).entry_ino;
                             (void)make_orphan(found_child_ino);
                         }
                     }

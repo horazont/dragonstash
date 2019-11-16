@@ -165,7 +165,7 @@ public:
 
 
 template<typename T>
-[[nodiscard]] inline Result<typename std::remove_reference<T>::type> make_result(T &&value)
+[[nodiscard]] inline Result<std::remove_const_t<std::remove_reference_t<T>>> make_result(T &&value)
 {
     return Result<typename std::remove_reference<T>::type>(std::forward<T>(value));
 }
