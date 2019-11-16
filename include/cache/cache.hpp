@@ -671,6 +671,8 @@ public:
      */
     [[nodiscard]] Result<void> release(ino_t ino, uint64_t nlocks = 1);
 
+    [[nodiscard]] Result<bool> test_flag(ino_t ino, InodeFlag flag);
+
     inline explicit operator bool() const {
         return bool(m_txn);
     }
@@ -748,6 +750,10 @@ public:
     [[nodiscard]] Result<void> clean_orphans();
 
     [[nodiscard]] Result<void> writelink(ino_t ino, std::string_view dest);
+
+    [[nodiscard]] Result<void> update_flags(ino_t ino,
+                                            std::initializer_list<InodeFlag> to_set,
+                                            std::initializer_list<InodeFlag> to_clear = std::initializer_list<InodeFlag>());
 };
 
 }

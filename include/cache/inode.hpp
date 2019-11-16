@@ -109,10 +109,24 @@ struct DirectoryEntry: public Stat {
     bool complete;
 };
 
+enum class InodeFlag {
+    /**
+     * @brief Indicate that the inode has been fully synced from the source at
+     * least once.
+     *
+     * This is currently only used for directories. If the flag is set, the
+     * filesystem interface can confidently return ENOENT for entries which
+     * cannot be looked up in the directory. Otherwise, it has to return EIO,
+     * because the entries may either not exist on the source or may not have
+     * been synced yet.
+     */
+    SYNCED = 0,
+};
+
 struct InodeV1 {
     std::uint8_t version;
     std::uint8_t _reserved0;
-    std::uint16_t _reserved1;
+    std::uint16_t flags;
     std::uint32_t _reserved2;
     ino_t parent;
     InodeAttributes attr;
@@ -140,6 +154,20 @@ struct InodeV1 {
         return result->extract();
     }
 #endif
+
+    [[nodiscard]] inline bool test_flag(InodeFlag flag) const {
+        return (flags & (1<<static_cast<unsigned>(flag))) != 0;
+    }
+
+    inline void set_flag(InodeFlag flag, bool presence = true) {
+        if (presence) {
+            flags |= (1<<static_cast<unsigned>(flag));
+        } else {
+            flags &= ~static_cast<decltype(flags)>(1<<static_cast<unsigned>(flag));
+        }
+    }
+
+
 };
 
 using Inode = InodeV1;

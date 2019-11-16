@@ -701,6 +701,25 @@ Result<void> CacheTransactionRO::release(ino_t ino, uint64_t nlocks)
     return make_result();
 }
 
+Result<bool> CacheTransactionRO::test_flag(ino_t ino, InodeFlag flag)
+{
+    auto cursor = ro_transaction()->getCursor(db().inodes_db());
+    const MDBInVal key_in(ino);
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+    if (cursor.find(key_in, key_out, value_out) != 0) {
+        return make_result(FAILED, ENOENT);
+    }
+    auto inode = Inode::parse_inplace(std::basic_string_view<std::byte>(
+                                          reinterpret_cast<std::byte*>(value_out.d_mdbval.mv_data),
+                                          value_out.d_mdbval.mv_size
+                                          ));
+    if (!inode) {
+        return copy_error(inode);
+    }
+    return (*inode)->test_flag(flag);
+}
+
 void CacheTransactionRO::abort()
 {
     // two separate loops here to ensure that all stage 1 rollback callbacks
@@ -993,6 +1012,35 @@ Result<void> CacheTransactionRW::writelink(ino_t ino, std::string_view dest)
         }
     }
     rw_transaction()->put(db().links_db(), ino, dest);
+    return make_result();
+}
+
+Result<void> CacheTransactionRW::update_flags(ino_t ino, std::initializer_list<InodeFlag> to_set, std::initializer_list<InodeFlag> to_clear)
+{
+    auto cursor = rw_transaction()->getRWCursor(db().inodes_db());
+    const MDBInVal key_in(ino);
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+
+    if (cursor.find(key_in, key_out, value_out) != 0) {
+        return make_result(FAILED, ENOENT);
+    }
+
+    auto inode = inode_from_lmdb(value_out);
+    if (!inode) {
+        return copy_error(inode);
+    }
+
+    for (InodeFlag flag: to_set) {
+        inode->set_flag(flag, true);
+    }
+    for (InodeFlag flag: to_clear) {
+        inode->set_flag(flag, false);
+    }
+
+    const auto buf = serialize_as<char>(*inode);
+    cursor.put(key_out, buf);
+
     return make_result();
 }
 

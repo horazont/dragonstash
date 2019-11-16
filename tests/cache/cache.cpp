@@ -1597,3 +1597,100 @@ SCENARIO("Transaction nesting") {
         }
     }
 }
+
+SCENARIO("Inode flags")
+{
+    TestSetup setup;
+    Dragonstash::Cache &cache = setup.cache();
+
+    GIVEN("An empty cache") {
+        WHEN("Testing the root inode for a flag") {
+            auto txn = cache.begin_ro();
+            auto result = txn.test_flag(Dragonstash::ROOT_INO,
+                                        Dragonstash::InodeFlag::SYNCED);
+
+            THEN("It succeeds and returns false") {
+                CHECK(result.error() == 0);
+                REQUIRE(result);
+                CHECK(!*result);
+            }
+        }
+
+        WHEN("Testing a nonexistent inode for a flag") {
+            auto txn = cache.begin_ro();
+            auto result = txn.test_flag(nonexistent_inode,
+                                        Dragonstash::InodeFlag::SYNCED);
+
+            THEN("It fails with ENOENT") {
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+        }
+
+        WHEN("Setting a flag on a nonexistent inode") {
+            auto txn = cache.begin_rw();
+            auto result = txn.update_flags(nonexistent_inode,
+                                           {Dragonstash::InodeFlag::SYNCED});
+
+            THEN("It fails with ENOENT") {
+                CHECK(result.error() == ENOENT);
+                CHECK(!result);
+            }
+        }
+
+        WHEN("Setting a flag on the root") {
+            Dragonstash::Result<void> result;
+            {
+                auto txn = cache.begin_rw();
+                result = txn.update_flags(Dragonstash::ROOT_INO,
+                                          {Dragonstash::InodeFlag::SYNCED});
+                (void)txn.commit();
+            }
+
+            THEN("It succeeds") {
+                CHECK(result.error() == 0);
+                CHECK(result);
+            }
+
+            AND_WHEN("Testing that flag") {
+                auto txn = cache.begin_ro();
+                auto result = txn.test_flag(Dragonstash::ROOT_INO,
+                                            Dragonstash::InodeFlag::SYNCED);
+
+                THEN("It succeeds and returns true") {
+                    CHECK(result.error() == 0);
+                    REQUIRE(result);
+                    CHECK(*result);
+                }
+            }
+
+            AND_WHEN("Clearing that flag on the root") {
+                Dragonstash::Result<void> result;
+                {
+                    auto txn = cache.begin_rw();
+                    result = txn.update_flags(Dragonstash::ROOT_INO,
+                                              {},
+                                              {Dragonstash::InodeFlag::SYNCED});
+                    (void)txn.commit();
+                }
+
+                THEN("It succeds") {
+                    CHECK(result.error() == 0);
+                    CHECK(result);
+                }
+
+                AND_WHEN("Testing that flag") {
+                    auto txn = cache.begin_ro();
+                    auto result = txn.test_flag(Dragonstash::ROOT_INO,
+                                                Dragonstash::InodeFlag::SYNCED);
+
+                    THEN("It succeds and returns false") {
+                        CHECK(result.error() == 0);
+                        REQUIRE(result);
+                        CHECK(!*result);
+                    }
+                }
+            }
+        }
+    }
+}
