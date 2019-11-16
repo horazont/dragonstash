@@ -28,6 +28,8 @@ authors named in the AUTHORS file.
 #include <filesystem>
 #include <variant>
 
+#include "common.hpp"
+
 namespace Dragonstash {
 
 class FileHandle
@@ -189,28 +191,8 @@ private:
     mutable File *m_mapping;
     mutable std::size_t m_mapped_size;
 
-    struct SuperblockGuard
-    {
-    public:
-        explicit SuperblockGuard(const Superblock &superblock);
-        explicit SuperblockGuard(int fd);
-
-    private:
-        static Superblock read_superblock(int fd);
-
-    private:
-        std::variant<const Superblock*, Superblock> m_superblock;
-
-    public:
-        [[nodiscard]] inline const Superblock &superblock() const {
-            const Superblock *const *ref = std::get_if<const Superblock*>(&m_superblock);
-            if (ref) {
-                return **ref;
-            }
-            return std::get<Superblock>(m_superblock);
-        }
-
-    };
+    using SuperblockGuard = copyfree_wrap<Superblock>;
+    static Superblock read_superblock(int fd);
 
 private:
     static FileHandle open(const std::filesystem::path &path);
@@ -252,7 +234,7 @@ private:
      */
     [[nodiscard]] inline SuperblockGuard temporary_superblock() const {
         if (!m_mapping) {
-            return SuperblockGuard(int(m_fd));
+            return SuperblockGuard(std::move(read_superblock(int(m_fd))));
         }
         return SuperblockGuard(m_mapping->superblock);
     }

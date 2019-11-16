@@ -571,7 +571,7 @@ uint64_t Blocklist::blocks(Blocklist::State state) const
 uint64_t Blocklist::present_blocks() const
 {
     auto superblock_guard = temporary_superblock();
-    const Superblock &superblock = superblock_guard.superblock();
+    const Superblock &superblock = *superblock_guard;
 
     std::uint64_t total_blocks = 0;
     for (auto nblocks: superblock.blocks_by_state) {
@@ -582,12 +582,12 @@ uint64_t Blocklist::present_blocks() const
 
 uint64_t Blocklist::size() const
 {
-    return temporary_superblock().superblock().size;
+    return temporary_superblock()->size;
 }
 
 uint64_t Blocklist::nentries() const
 {
-    return temporary_superblock().superblock().entries;
+    return temporary_superblock()->entries;
 }
 
 uint64_t Blocklist::capacity() const
@@ -678,7 +678,7 @@ void Blocklist::fsck() const
 void Blocklist::shrink() const
 {
     auto superblock_guard = temporary_superblock();
-    const Superblock &superblock = superblock_guard.superblock();
+    const Superblock &superblock = *superblock_guard;
 
     const std::size_t curr_grow_steps = m_mapped_size / grow_size;
     if (curr_grow_steps <= 1) {
@@ -736,19 +736,7 @@ std::ostream &Blocklist::dump(std::ostream &out) const
     return out << "}" << std::endl;
 }
 
-Blocklist::SuperblockGuard::SuperblockGuard(const Blocklist::Superblock &superblock):
-    m_superblock(&superblock)
-{
-
-}
-
-Blocklist::SuperblockGuard::SuperblockGuard(int fd):
-    m_superblock(read_superblock(fd))
-{
-
-}
-
-Blocklist::Superblock Blocklist::SuperblockGuard::read_superblock(int fd)
+Blocklist::Superblock Blocklist::read_superblock(int fd)
 {
     Superblock result;
     ssize_t read = ::pread(fd, &result, sizeof(Superblock), 0);

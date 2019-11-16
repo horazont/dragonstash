@@ -26,11 +26,64 @@ authors named in the AUTHORS file.
 #define DRAGONSTASH_CACHE_COMMON_H
 
 #include <cstdint>
+#include <variant>
 
 namespace Dragonstash {
 
 static constexpr std::size_t CACHE_PAGE_SIZE = 4096;
 static constexpr std::size_t CACHE_INODE_SIZE = CACHE_PAGE_SIZE / 16;
+
+template <typename T>
+class copyfree_wrap
+{
+public:
+    copyfree_wrap() noexcept = default;
+
+    explicit copyfree_wrap(const T &obj) noexcept:
+        m_value(&obj)
+    {
+
+    }
+
+    explicit copyfree_wrap(T &&obj) noexcept:
+        m_value(std::move(obj))
+    {
+
+    }
+
+    copyfree_wrap(const copyfree_wrap &src) = default;
+    copyfree_wrap(copyfree_wrap &&src) noexcept = default;
+    copyfree_wrap &operator=(const copyfree_wrap &src) = default;
+    copyfree_wrap &operator=(copyfree_wrap &&src) noexcept = default;
+    ~copyfree_wrap() = default;
+
+private:
+    using pointer_type = const T*;
+    using value_type = T;
+
+    std::variant<pointer_type, value_type> m_value;
+    static_assert(sizeof(decltype(m_value)) >= sizeof(value_type));
+
+public:
+    [[nodiscard]] inline const T &value() const {
+        if (std::holds_alternative<pointer_type>(m_value)) {
+            return *std::get<pointer_type>(m_value);
+        }
+        return std::get<value_type>(m_value);
+    }
+
+    explicit operator bool() const {
+        return !std::holds_alternative<pointer_type>(m_value) || std::get<pointer_type>(m_value);
+    }
+
+    const T &operator*() const {
+        return value();
+    }
+
+    const T *operator->() const {
+        return &value();
+    }
+};
 
 }
 
