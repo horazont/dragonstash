@@ -143,6 +143,9 @@ SCENARIO("Directory entry replacement")
     Dragonstash::InodeAttributes attr{
         .mode = S_IFDIR
     };
+    Dragonstash::InodeAttributes other_attr{
+        .mode = S_IFREG
+    };
 
     GIVEN("A directory with two entries") {
         auto entry_result = cache.emplace(Dragonstash::ROOT_INO,
@@ -157,10 +160,25 @@ SCENARIO("Directory entry replacement")
         REQUIRE(second_entry_result);
         ino_t second_entry_ino = *second_entry_result;
 
-        WHEN("Emplacing a new inode with a conflicting name") {
+        WHEN("Emplacing a new inode with a conflicting name and equal format") {
             auto new_result = cache.emplace(Dragonstash::ROOT_INO,
                                             "entry",
                                             attr);
+            THEN("The same inode is returned") {
+                REQUIRE(new_result);
+                CHECK(*new_result == entry_ino);
+            }
+
+            THEN("The second entry is unharmed") {
+                auto lookup_result = cache.lookup(Dragonstash::ROOT_INO,
+                                                  "other");
+            }
+        }
+
+        WHEN("Emplacing a new inode with a conflicting name and format") {
+            auto new_result = cache.emplace(Dragonstash::ROOT_INO,
+                                            "entry",
+                                            other_attr);
             THEN("A new inode is returned") {
                 REQUIRE(new_result);
                 CHECK(*new_result != entry_ino);

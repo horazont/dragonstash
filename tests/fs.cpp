@@ -142,6 +142,21 @@ SCENARIO("lookup") {
                     CHECK(entry.attr.st_mtim.tv_nsec == env.default_timestamp().tv_nsec);
                 }
             }
+
+            AND_WHEN("Re-requesting the same file") {
+                check_reply_type(req, TestFuseReplyType::ENTRY);
+                auto entry_1 = std::get<TestFuseReplyEntry>(req.reply_argv());
+
+                auto req = env.fuse().new_request();
+                fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+
+                THEN("Its inode number is unchanged") {
+                    check_reply_type(req, TestFuseReplyType::ENTRY);
+                    auto entry_2 = std::get<TestFuseReplyEntry>(req.reply_argv());
+
+                    CHECK(entry_1.ino == entry_2.ino);
+                }
+            }
         }
 
         WHEN("Requesting to look up a nonexistent file") {
@@ -343,6 +358,28 @@ SCENARIO("opendir and readdir") {
                             check_reply_error(req, EIO);
                         }
                     }
+                }
+            }
+
+            AND_WHEN("Calling opendir again") {
+                auto lookup_result_1 = env.cache().lookup(Dragonstash::ROOT_INO, "README.md");
+                REQUIRE(lookup_result_1);
+                auto lookup_result_2 = env.cache().lookup(Dragonstash::ROOT_INO, "books");
+                REQUIRE(lookup_result_2);
+
+                auto req = env.fuse().new_request();
+                struct fuse_file_info fi{};
+                fs.opendir(req.wrap(), Dragonstash::ROOT_INO, &fi);
+                check_reply_type(req, TestFuseReplyType::OPEN);
+
+                THEN("Inode numbers do not change") {
+                    auto lookup_result_1_test = env.cache().lookup(Dragonstash::ROOT_INO, "README.md");
+                    REQUIRE(lookup_result_1_test);
+                    auto lookup_result_2_test = env.cache().lookup(Dragonstash::ROOT_INO, "books");
+                    REQUIRE(lookup_result_2_test);
+
+                    CHECK(*lookup_result_1 == *lookup_result_1_test);
+                    CHECK(*lookup_result_2 == *lookup_result_2_test);
                 }
             }
         }

@@ -347,7 +347,12 @@ public:
      * @param name Name of the directory entry.
      * @param attrs Attributes of the new entry.
      *
-     * If an entry with the same name exists already, the old one is replaced.
+     * If an entry with the same name exists already and the format of the
+     * inode (as specified in the mode filed of the attrs) differs, a new entry
+     * is created.
+     *
+     * If the format is equal, the existing inode is updated and the existing
+     * inode number is returned.
      *
      * @return The inode of the new entry.
      */

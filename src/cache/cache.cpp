@@ -88,6 +88,15 @@ static inline Result<Inode> inode_from_lmdb(const MDBOutVal &val)
 }
 
 
+static inline Result<copyfree_wrap<Inode>> inode_from_lmdb_inplace(const MDBOutVal &val)
+{
+    return Inode::parse_inplace(std::basic_string_view<std::byte>(
+                            reinterpret_cast<std::byte*>(val.d_mdbval.mv_data),
+                            val.d_mdbval.mv_size
+                            ));
+}
+
+
 CachedDir::CachedDir(MDBROTransaction &&transaction,
                      MDBROCursor &&cursor,
                      const ino_t ino):
@@ -881,7 +890,6 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
     }
 
     Inode inode = mkinode(attrs, parent);
-    ino_t ino = allocate_next_inode();
 
     // orphan old inode if this emplace operation overwrites an existing inode
     {
@@ -895,10 +903,24 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         MDBOutVal value_out{};
         if (name_cursor.find(key, key_out, value_out) != MDB_NOTFOUND) {
             const auto old_ino = value_out.get<ino_t>();
+            // now we have to check whether the format differs
+            auto ino_cursor = rw_transaction()->getRWCursor(db().inodes_db());
+            assert(ino_cursor.find(old_ino, key_out, value_out) == 0);
+            auto old_inode = inode_from_lmdb_inplace(value_out);
+            assert(old_inode);
+            if (((*old_inode)->attr.mode & S_IFMT) == (attrs.mode & S_IFMT)) {
+                // do *not* remove, only update in-place
+                const auto buf = serialize_as<char>(inode);
+                ino_cursor.put(key_out, buf);
+                return make_result(old_ino);
+            }
+
             // if orphaning won't work, we can't be saved anyways
             (void)make_orphan(old_ino);
         }
     }
+
+    ino_t ino = allocate_next_inode();
 
     // write inode
     {
