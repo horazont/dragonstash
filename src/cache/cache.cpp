@@ -487,12 +487,12 @@ Result<ino_t> CacheTransactionRO::parent(ino_t ino)
         return make_result(FAILED, ENOENT);
     }
 
-    auto parsed = inode_from_lmdb(value);
+    auto parsed = inode_from_lmdb_inplace(value);
     if (!parsed) {
-        return make_result(FAILED, parsed.error());
+        return copy_error(parsed);
     }
 
-    return parsed->parent;
+    return (*parsed)->parent;
 }
 
 Result<ino_t> CacheTransactionRO::lookup(ino_t parent, std::string_view name)
@@ -1004,9 +1004,9 @@ Result<void> CacheTransactionRW::clean_orphans()
             MDBOutVal key_out{};
             MDBOutVal value_out{};
             if (inode_cursor.find(ino, key_out, value_out) == 0) {
-                auto inode_res = inode_from_lmdb(value_out);
+                auto inode_res = inode_from_lmdb_inplace(value_out);
                 if (inode_res) {
-                    switch (inode_res->attr.mode & S_IFMT)
+                    switch ((*inode_res)->attr.mode & S_IFMT)
                     {
                     case S_IFLNK:
                     {
