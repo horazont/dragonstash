@@ -26,8 +26,14 @@ authors named in the AUTHORS file.
 #define DRAGONSTASH_CACHE_INODE_H
 
 #include <cstdint>
+#include <cstring>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <string_view>
+
+#if __cpp_lib_span >= 201803L
+#include <span>
+#endif
 
 #include "error.hpp"
 #include "backend.hpp"
@@ -50,77 +56,126 @@ struct CommonFileAttributes {
     struct timespec ctime;
 };
 
-struct InodeAttributes: public CommonFileAttributes {
+static_assert(std::is_pod_v<CommonFileAttributes>);
+
+struct InodeAttributes {
+    CommonFileAttributes common;
     std::uint32_t mode;
+
+    static InodeAttributes from_backend_stat(const Backend::Stat &attr)
+    {
+        return InodeAttributes{
+            .common = CommonFileAttributes{
+                .size = attr.size,
+                .nblocks = 0,
+                .uid = attr.uid,
+                .gid = attr.gid,
+                .atime = attr.atime,
+                .mtime = attr.mtime,
+                .ctime = attr.ctime
+            },
+            .mode = attr.mode
+        };
+    }
 };
 
-struct Stat: public InodeAttributes {
+static_assert(std::is_pod_v<InodeAttributes>);
+
+struct Stat {
+    InodeAttributes attr;
     ino_t ino;
 
     inline operator struct stat() const {
         struct stat result{};
         result.st_ino = ino;
-        result.st_mode = mode;
+        result.st_mode = attr.mode;
         result.st_nlink = 1;
-        result.st_uid = uid;
-        result.st_gid = gid;
-        result.st_size = off_t(size);
+        result.st_uid = attr.common.uid;
+        result.st_gid = attr.common.gid;
+        result.st_size = off_t(attr.common.size);
         result.st_blksize = CACHE_PAGE_SIZE;
-        result.st_blocks = blkcnt_t(nblocks);
-        result.st_atim = atime;
-        result.st_mtim = mtime;
-        result.st_ctim = ctime;
+        result.st_blocks = blkcnt_t(attr.common.nblocks);
+        result.st_atim = attr.common.atime;
+        result.st_mtim = attr.common.mtime;
+        result.st_ctim = attr.common.ctime;
         return result;
     }
 };
+
+static_assert(std::is_pod_v<Stat>);
 
 struct DirectoryEntry: public Stat {
     std::string name;
     bool complete;
 };
 
-struct Inode: public InodeAttributes {
+struct InodeV1 {
+    std::uint8_t version;
+    std::uint8_t _reserved0;
+    std::uint16_t _reserved1;
+    std::uint32_t _reserved2;
     ino_t parent;
+    InodeAttributes attr;
 
-    static constexpr std::size_t serialized_size =
-            sizeof(std::uint8_t) + /* version */
-            sizeof(parent) +
-            sizeof(mode) +
-            sizeof(size) +
-            sizeof(nblocks) +
-            sizeof(uid) +
-            sizeof(gid) +
-            sizeof(atime.tv_sec) +
-            sizeof(atime.tv_nsec) +
-            sizeof(mtime.tv_sec) +
-            sizeof(mtime.tv_nsec) +
-            sizeof(ctime.tv_sec) +
-            sizeof(ctime.tv_nsec);
+    static Result<copyfree_wrap<InodeV1>> parse_inplace(std::basic_string_view<std::byte> buf);
 
-    static Inode from_backend_stat(const Backend::Stat &data) {
-        return Inode{
-            InodeAttributes{
-                CommonFileAttributes{
-                    .size = data.size,
-                    .nblocks = 0,
-                    .uid = data.uid,
-                    .gid = data.gid,
-                    .atime = timespec{data.atime.tv_sec, data.atime.tv_nsec},
-                    .mtime = timespec{data.mtime.tv_sec, data.mtime.tv_nsec},
-                    .ctime = timespec{data.ctime.tv_sec, data.ctime.tv_nsec},
-                },
-                .mode = data.mode,
-            },
-            .parent = INVALID_INO,
-        };
+    static inline Result<InodeV1> parse(std::basic_string_view<std::byte> buf) {
+        auto result = parse_inplace(buf);
+        if (!result) {
+            return copy_error(result);
+        }
+        return result->extract();
     }
 
-    static Result<Inode> parse(const std::uint8_t *buf, size_t sz);
-    void serialize(std::uint8_t *buf);
+#if __cpp_lib_span >= 201803L
+    static inline Result<copyfree_wrap<InodeV1>> parse_inplace(std::span<const std::byte> buf) {
+        return parse_inplace(std::basic_string_view<std::byte>(buf.data(), buf.size());
+    }
 
-private:
-    static Result<Inode> parse_v1(const std::uint8_t *buf, size_t sz);
+    static inline Result<InodeV1> parse(std::span<const std::byte> buf) {
+        auto result = parse_inplace(buf);
+        if (!result) {
+            return copy_error(result);
+        }
+        return result->extract();
+    }
+#endif
 };
+
+using Inode = InodeV1;
+
+static_assert(std::is_pod_v<Inode>);
+
+static constexpr std::size_t INODE_SIZE = sizeof(Inode);
+static constexpr std::size_t INODE_CURRENT_VERSION = 1;
+
+template <typename T>
+inline Inode mkinode(T &&attr, ino_t parent = INVALID_INO) {
+    return Inode{
+        .version = INODE_CURRENT_VERSION,
+        .parent = parent,
+        .attr = std::forward<T>(attr),
+    };
+}
+
+inline void serialize(const Inode &inode, std::byte *buf) {
+    memcpy(buf, &inode, INODE_SIZE);
+}
+
+template <typename T, typename _ = typename std::enable_if<sizeof(T) == 1 && std::is_arithmetic_v<T>>::type>
+inline std::basic_string<T> serialize_as(const Inode &inode) {
+    std::basic_string<T> buf;
+    buf.resize(INODE_SIZE);
+    serialize(inode, reinterpret_cast<std::byte*>(buf.data()));
+    return buf;
+}
+
+inline std::basic_string<std::byte> serialize(const Inode &inode) {
+    std::basic_string<std::byte> buf;
+    buf.resize(INODE_SIZE);
+    serialize(inode, buf.data());
+    return buf;
+}
 
 }
 

@@ -250,27 +250,27 @@ SCENARIO("Attributes retrieval and storage")
 
             THEN("It is a directory") {
                 REQUIRE(getattr_result);
-                CHECK((getattr_result->mode & S_IFMT) == S_IFDIR);
+                CHECK((getattr_result->attr.mode & S_IFMT) == S_IFDIR);
             }
 
             THEN("Its UID and GID are the IDs of the current user") {
                 REQUIRE(getattr_result);
-                CHECK(getattr_result->uid == getuid());
-                CHECK(getattr_result->gid == getgid());
+                CHECK(getattr_result->attr.common.uid == getuid());
+                CHECK(getattr_result->attr.common.gid == getgid());
             }
 
             THEN("Its timestamps are close to now") {
                 REQUIRE(getattr_result);
                 auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-                CHECK((now - getattr_result->atime.tv_sec) < 10);
-                CHECK((now - getattr_result->mtime.tv_sec) < 10);
-                CHECK((now - getattr_result->ctime.tv_sec) < 10);
+                CHECK((now - getattr_result->attr.common.atime.tv_sec) < 10);
+                CHECK((now - getattr_result->attr.common.mtime.tv_sec) < 10);
+                CHECK((now - getattr_result->attr.common.ctime.tv_sec) < 10);
             }
 
             THEN("Its size is zero") {
                 REQUIRE(getattr_result);
-                CHECK(getattr_result->size == 0);
-                CHECK(getattr_result->nblocks == 0);
+                CHECK(getattr_result->attr.common.size == 0);
+                CHECK(getattr_result->attr.common.nblocks == 0);
             }
         }
     }
@@ -290,17 +290,17 @@ SCENARIO("Attributes retrieval and storage")
             REQUIRE(getattr_result);
 
             THEN("The attributes from emplace have been preserved") {
-                CHECK(getattr_result->mode == attr.mode);
-                CHECK(getattr_result->gid == attr.gid);
-                CHECK(getattr_result->uid == attr.uid);
-                CHECK(getattr_result->size == attr.size);
-                CHECK(getattr_result->nblocks == attr.nblocks);
-                CHECK(getattr_result->atime.tv_sec == attr.atime.tv_sec);
-                CHECK(getattr_result->atime.tv_nsec == attr.atime.tv_nsec);
-                CHECK(getattr_result->mtime.tv_sec == attr.mtime.tv_sec);
-                CHECK(getattr_result->mtime.tv_nsec == attr.mtime.tv_nsec);
-                CHECK(getattr_result->ctime.tv_sec == attr.ctime.tv_sec);
-                CHECK(getattr_result->ctime.tv_nsec == attr.ctime.tv_nsec);
+                CHECK(getattr_result->attr.mode == attr.mode);
+                CHECK(getattr_result->attr.common.gid == attr.common.gid);
+                CHECK(getattr_result->attr.common.uid == attr.common.uid);
+                CHECK(getattr_result->attr.common.size == attr.common.size);
+                CHECK(getattr_result->attr.common.nblocks == attr.common.nblocks);
+                CHECK(getattr_result->attr.common.atime.tv_sec == attr.common.atime.tv_sec);
+                CHECK(getattr_result->attr.common.atime.tv_nsec == attr.common.atime.tv_nsec);
+                CHECK(getattr_result->attr.common.mtime.tv_sec == attr.common.mtime.tv_sec);
+                CHECK(getattr_result->attr.common.mtime.tv_nsec == attr.common.mtime.tv_nsec);
+                CHECK(getattr_result->attr.common.ctime.tv_sec == attr.common.ctime.tv_sec);
+                CHECK(getattr_result->attr.common.ctime.tv_nsec == attr.common.ctime.tv_nsec);
             }
 
             THEN("The inode number in the result matches") {
@@ -327,17 +327,17 @@ SCENARIO("Attributes retrieval and storage")
                 auto getattr_result = cache.getattr(*emplace2_result);
                 CHECK(getattr_result.error() == 0);
                 REQUIRE(getattr_result);
-                CHECK(getattr_result->mode == attr2.mode);
-                CHECK(getattr_result->gid == attr2.gid);
-                CHECK(getattr_result->uid == attr2.uid);
-                CHECK(getattr_result->size == attr2.size);
-                CHECK(getattr_result->nblocks == attr2.nblocks);
-                CHECK(getattr_result->atime.tv_sec == attr2.atime.tv_sec);
-                CHECK(getattr_result->atime.tv_nsec == attr2.atime.tv_nsec);
-                CHECK(getattr_result->mtime.tv_sec == attr2.mtime.tv_sec);
-                CHECK(getattr_result->mtime.tv_nsec == attr2.mtime.tv_nsec);
-                CHECK(getattr_result->ctime.tv_sec == attr2.ctime.tv_sec);
-                CHECK(getattr_result->ctime.tv_nsec == attr2.ctime.tv_nsec);
+                CHECK(getattr_result->attr.mode == attr2.mode);
+                CHECK(getattr_result->attr.common.gid == attr2.common.gid);
+                CHECK(getattr_result->attr.common.uid == attr2.common.uid);
+                CHECK(getattr_result->attr.common.size == attr2.common.size);
+                CHECK(getattr_result->attr.common.nblocks == attr2.common.nblocks);
+                CHECK(getattr_result->attr.common.atime.tv_sec == attr2.common.atime.tv_sec);
+                CHECK(getattr_result->attr.common.atime.tv_nsec == attr2.common.atime.tv_nsec);
+                CHECK(getattr_result->attr.common.mtime.tv_sec == attr2.common.mtime.tv_sec);
+                CHECK(getattr_result->attr.common.mtime.tv_nsec == attr2.common.mtime.tv_nsec);
+                CHECK(getattr_result->attr.common.ctime.tv_sec == attr2.common.ctime.tv_sec);
+                CHECK(getattr_result->attr.common.ctime.tv_nsec == attr2.common.ctime.tv_nsec);
             }
         }
     }

@@ -63,7 +63,7 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
     }
 
     if (stat_result) {
-        auto cache_attrs = Inode::from_backend_stat(*stat_result);
+        auto cache_attrs = InodeAttributes::from_backend_stat(*stat_result);
 
         ino_result = txn.emplace(parent, name, cache_attrs);
         if (!ino_result) {
@@ -72,8 +72,8 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
         }
 
         e.attr = Stat{
-            InodeAttributes(cache_attrs),
-            .ino = *ino_result
+            cache_attrs,
+            *ino_result
         };
     } else {
         // backend not connected, retrieve from cache if available
@@ -177,7 +177,7 @@ void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
         if (!stat_result) {
             continue;
         }
-        const auto info = Inode::from_backend_stat(*stat_result);
+        const auto info = InodeAttributes::from_backend_stat(*stat_result);
         (void)txn.emplace(ino, entry->name, info);
     }
 

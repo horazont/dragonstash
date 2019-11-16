@@ -83,6 +83,13 @@ public:
     const T *operator->() const {
         return &value();
     }
+
+    [[nodiscard]] T extract() const {
+        if (std::holds_alternative<pointer_type>(m_value)) {
+            return T(**this);
+        }
+        return std::get<value_type>(m_value);
+    }
 };
 
 }

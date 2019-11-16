@@ -153,8 +153,8 @@ Result<DirEntry> DirHandle::readdir()
             Stat{
                 .ino = 0,
             },
-            .name = ".",
-            .complete = false,
+            ".",
+            false,
         };
     case DOTDOT:
         m_state = ITERATION;
@@ -162,8 +162,8 @@ Result<DirEntry> DirHandle::readdir()
             Stat{
                 .ino = 0,
             },
-            .name = "..",
-            .complete = false,
+            "..",
+            false,
         };
     case ITERATION:;
     }
@@ -180,8 +180,8 @@ Result<DirEntry> DirHandle::readdir()
         Stat{
             .ino = 0,
         },
-        .name = iter->first,
-        .complete = false,
+        iter->first,
+        false,
     };
 }
 

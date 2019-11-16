@@ -81,8 +81,10 @@ T safe_dec(T &value, T by = 1)
 
 static inline Result<Inode> inode_from_lmdb(const MDBOutVal &val)
 {
-    return Inode::parse(reinterpret_cast<std::uint8_t*>(val.d_mdbval.mv_data),
-                        val.d_mdbval.mv_size);
+    return Inode::parse(std::basic_string_view<std::byte>(
+                            reinterpret_cast<std::byte*>(val.d_mdbval.mv_data),
+                            val.d_mdbval.mv_size
+                            ));
 }
 
 
@@ -145,8 +147,8 @@ Result<DirectoryEntry> CachedDir::parse_entry_v1(const char *buf, size_t sz)
     memcpy(&result.ino, &buf[0], sizeof(result.ino));
     buf += sizeof(result.ino); sz -= sizeof(result.ino);
 
-    memcpy(&result.mode, &buf[0], sizeof(result.mode));
-    buf += sizeof(result.mode); sz -= sizeof(result.mode);
+    memcpy(&result.attr.mode, &buf[0], sizeof(result.attr.mode));
+    buf += sizeof(result.attr.mode); sz -= sizeof(result.attr.mode);
 
     assert(sz >= 1);
     result.name = std::string(&buf[0], sz);
@@ -294,23 +296,20 @@ Cache::Cache(const std::filesystem::path &db_path):
         // create root inode!
         struct timespec now{};
         clock_gettime(CLOCK_REALTIME, &now);
-        Inode root{
-            InodeAttributes{
-                CommonFileAttributes{
-                    .uid = getuid(),
-                    .gid = getgid(),
-                    .atime = now,
-                    .mtime = now,
-                    .ctime = now,
-                },
-                .mode = S_IFDIR,
-            },
-            .parent = INVALID_INO,
-        };
+        Inode root = mkinode(
+                    InodeAttributes{
+                        .common = CommonFileAttributes{
+                            .uid = getuid(),
+                            .gid = getgid(),
+                            .atime = now,
+                            .mtime = now,
+                            .ctime = now,
+                        },
+                        .mode = S_IFDIR,
+                    }
+        );
         const ino_t root_ino = ROOT_INO;
-        std::string buf;
-        buf.resize(Inode::serialized_size);
-        root.serialize(reinterpret_cast<std::uint8_t*>(buf.data()));
+        auto buf = serialize_as<char>(root);
         txn->put(m_db.inodes_db(), root_ino, buf);
     }
     txn->commit();
@@ -543,8 +542,8 @@ Result<Stat> CacheTransactionRO::getattr(ino_t ino)
     }
 
     return Stat{
-        static_cast<InodeAttributes>(*parsed),
-        .ino = ino,
+        InodeAttributes(parsed->attr),
+        ino,
     };
 }
 
@@ -572,8 +571,8 @@ Result<DirectoryEntry> CacheTransactionRO::readdir(ino_t dir, ino_t prev_end)
                                Stat{
                                    .ino = dir,
                                },
-                               .name = std::string("."),
-                               .complete = false,
+                               std::string("."),
+                               false,
                            });
     }
     auto parent_result = parent(dir);
@@ -586,8 +585,8 @@ Result<DirectoryEntry> CacheTransactionRO::readdir(ino_t dir, ino_t prev_end)
                                Stat{
                                    .ino = *parent_result,
                                },
-                               .name = std::string(".."),
-                               .complete = false,
+                               std::string(".."),
+                               false,
                            });
     }
 
@@ -635,8 +634,8 @@ Result<DirectoryEntry> CacheTransactionRO::readdir(ino_t dir, ino_t prev_end)
                            Stat{
                                .ino = key[1],
                            },
-                           .name = std::string(entry_name),
-                           .complete = false,
+                           std::string(entry_name),
+                           false,
                        });
 }
 
@@ -843,9 +842,7 @@ Result<void> CacheTransactionRW::make_orphan(ino_t ino)
             auto old_inode = inode_from_lmdb(value_out);
             if (old_inode) {
                 old_inode->parent = 0;
-                std::string value_buf;
-                value_buf.resize(Inode::serialized_size);
-                old_inode->serialize(reinterpret_cast<std::uint8_t*>(value_buf.data()));
+                const auto value_buf = serialize_as<char>(*old_inode);
                 cursor.put(key_out, value_buf);
             }
         }
@@ -864,10 +861,7 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
         }
     }
 
-    Inode inode{
-        attrs,
-        .parent = parent
-    };
+    Inode inode = mkinode(attrs, parent);
     ino_t ino = allocate_next_inode();
 
     // orphan old inode if this emplace operation overwrites an existing inode
@@ -890,11 +884,8 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
     // write inode
     {
         MDBInVal key(ino);
-        std::vector<std::uint8_t> buf;
-        buf.resize(Inode::serialized_size);
-        inode.serialize(buf.data());
-        std::string_view value(reinterpret_cast<char*>(buf.data()), buf.size());
-        rw_transaction()->put(db().inodes_db(), key, value);
+        const auto buf = serialize_as<char>(inode);
+        rw_transaction()->put(db().inodes_db(), key, buf);
     }
 
     // write directory entry pair
@@ -949,7 +940,7 @@ Result<void> CacheTransactionRW::clean_orphans()
             if (inode_cursor.find(ino, key_out, value_out) == 0) {
                 auto inode_res = inode_from_lmdb(value_out);
                 if (inode_res) {
-                    switch (inode_res->mode & S_IFMT)
+                    switch (inode_res->attr.mode & S_IFMT)
                     {
                     case S_IFLNK:
                     {
@@ -996,7 +987,7 @@ Result<void> CacheTransactionRW::writelink(ino_t ino, std::string_view dest)
         if (!stat_result) {
             return copy_error(stat_result);
         }
-        if ((stat_result->mode & S_IFMT) != S_IFLNK) {
+        if ((stat_result->attr.mode & S_IFMT) != S_IFLNK) {
             // not a symlink -> EINVAL
             return make_result(FAILED, EINVAL);
         }

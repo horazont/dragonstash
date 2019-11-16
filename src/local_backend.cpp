@@ -158,8 +158,8 @@ Result<DirEntry> LocalDir::readdir()
             .mode = st_mode,
             .ino = entry->d_ino,
         },
-        .name = entry->d_name,
-        .complete = false,
+        entry->d_name,
+        false,
     };
 }
 
