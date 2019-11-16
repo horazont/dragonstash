@@ -24,6 +24,7 @@ authors named in the AUTHORS file.
 **********************************************************************/
 #include "cache/inode.hpp"
 
+#include <cassert>
 #include <cstring>
 
 namespace Dragonstash {
@@ -48,7 +49,7 @@ void put(std::uint8_t *&buf, T in)
     buf += sizeof(T);
 }
 
-Result<copyfree_wrap<InodeV1> > InodeV1::parse_inplace(std::basic_string_view<std::byte> buf)
+Result<copyfree_wrap<Inode> > Inode::parse_inplace(std::basic_string_view<std::byte> buf)
 {
     if (buf.empty()) {
         return make_result(FAILED, EINVAL);
@@ -62,7 +63,19 @@ Result<copyfree_wrap<InodeV1> > InodeV1::parse_inplace(std::basic_string_view<st
         return make_result(FAILED, EINVAL);
     }
 
-    return copyfree_wrap<InodeV1>(*reinterpret_cast<const InodeV1*>(buf.data()));
+    // alignment isn’t fulfilled, we have to use copy
+    if (reinterpret_cast<std::size_t>(buf.data()) % alignof(InodeV1) != 0) {
+        // TODO: make this so that it only fires if parse_inplace is called
+        // directly and not from parse(), which would take a copy anyways.
+        // Alternatively, re-implement parse() so that it never goes the
+        // round-trip through parse_inplace.
+        assert(false);
+        Inode inode;
+        memcpy(&inode, buf.data(), INODE_SIZE);
+        return copyfree_wrap<Inode>(std::move(inode));
+    }
+
+    return copyfree_wrap<Inode>(*reinterpret_cast<const InodeV1*>(buf.data()));
 }
 
 }
