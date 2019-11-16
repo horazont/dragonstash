@@ -80,14 +80,13 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
         ino_result = txn.lookup(parent, name);
         if (!ino_result) {
             if (ino_result.error() == ENOENT) {
-                // XXX: This is a tricky one, because we currently do not know
-                // whether the entry is currently not in the cache (e.g. because
-                // the parent has never been opendir()'d) or whether the entry
-                // truly does not exist on the remote.
-                // we return ENOENT for now, but we might want to return either
-                // ENOTCONN or EIO later on. Also, we might want negative
-                // caching / a flag on a directory indicating that it has been
-                // full-sync’d in opendir once.
+                auto flag_result = txn.test_flag(parent, InodeFlag::SYNCED);
+                if (!flag_result || !*flag_result) {
+                    // inode is not fully synced -> we return EIO, because we
+                    // can not be sure that the entry really does not exist.
+                    req.reply_err(EIO);
+                    return;
+                }
             }
             req.reply_err(ino_result.error());
             return;
@@ -160,25 +159,30 @@ void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
     }
 
     auto dir = m_backend_fs.opendir(backend_path);
-    if (!dir) {
+    if (!dir && dir.error() != ENOTCONN) {
         req.reply_err(dir.error());
         return;
     }
 
-    while (auto entry = (*dir)->readdir()) {
-        std::string entry_path(backend_path);
-        entry_path.reserve(entry_path.size() + entry->name.size() + 1);
-        if (entry_path.size() > 1) {
-            // need to add a slash to the end
-            entry_path += '/';
+    if (dir) {
+        // if upstream is available, we can sync here; otherwise we go with what
+        // we have cached.
+        while (auto entry = (*dir)->readdir()) {
+            std::string entry_path(backend_path);
+            entry_path.reserve(entry_path.size() + entry->name.size() + 1);
+            if (entry_path.size() > 1) {
+                // need to add a slash to the end
+                entry_path += '/';
+            }
+            entry_path += entry->name;
+            auto stat_result = m_backend_fs.lstat(entry_path);
+            if (!stat_result) {
+                continue;
+            }
+            const auto info = InodeAttributes::from_backend_stat(*stat_result);
+            (void)txn.emplace(ino, entry->name, info);
         }
-        entry_path += entry->name;
-        auto stat_result = m_backend_fs.lstat(entry_path);
-        if (!stat_result) {
-            continue;
-        }
-        const auto info = InodeAttributes::from_backend_stat(*stat_result);
-        (void)txn.emplace(ino, entry->name, info);
+        (void)txn.update_flags(ino, {InodeFlag::SYNCED});
     }
 
     fi->fh = 0;
@@ -197,6 +201,7 @@ void Filesystem::readdir(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t
     int error = 0;
     off_t cursor = off;
     std::size_t to_send = 0;
+    bool at_eof = false;
     auto txn = m_cache.begin_ro();
     while (buffer.length() < size) {
         to_send = buffer.length();
@@ -204,6 +209,7 @@ void Filesystem::readdir(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t
         auto readdir_result = txn.readdir(ino, cursor);
         if (!readdir_result) {
             error = readdir_result.error();
+            at_eof = error == 0;
             break;
         }
 
@@ -225,6 +231,16 @@ void Filesystem::readdir(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t
 
     if (error != 0) {
         req.reply_err(error);
+    }
+
+    if (at_eof && buffer.length() == 0) {
+        auto flag_result = txn.test_flag(ino, InodeFlag::SYNCED);
+        // ensure to return EIO at the end of the directory stream to indicate
+        // that it is incomplete if the directory is not fully synced
+        if (!flag_result || !*flag_result) {
+            req.reply_err(EIO);
+            return;
+        }
     }
 
     auto buf = buffer.get();

@@ -203,10 +203,8 @@ SCENARIO("lookup") {
                 auto req = env.fuse().new_request();
                 fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "books");
 
-                THEN("ENOENT is returned") {
-                    // XXX: This should really be EIO, but see the comment
-                    // inside the lookup() implementation about this.
-                    check_reply_error(req, ENOENT);
+                THEN("EIO is returned") {
+                    check_reply_error(req, EIO);
                 }
             }
 
@@ -234,6 +232,15 @@ SCENARIO("opendir and readdir") {
         env.with_default_contents();
         Dragonstash::Filesystem &fs = env.fs();
 
+        WHEN("Testing the synced flag of the root directory") {
+            THEN("It is unset") {
+                auto flag_result = env.cache().begin_ro().test_flag(Dragonstash::ROOT_INO, Dragonstash::InodeFlag::SYNCED);
+                CHECK(flag_result.error() == 0);
+                REQUIRE(flag_result);
+                CHECK(!*flag_result);
+            }
+        }
+
         WHEN("Opening the root directory with opendir") {
             auto req = env.fuse().new_request();
             struct fuse_file_info fi{};
@@ -242,19 +249,102 @@ SCENARIO("opendir and readdir") {
             THEN("The call succeeds and returns using fuse_reply_open") {
                 check_reply_type(req, TestFuseReplyType::OPEN);
             }
-        }
 
-        /* WHEN("Iterating the root directory") {
-            auto req = env.fuse().new_request();
-            {
-                struct fuse_file_info fi{};
-                fs.opendir(req.wrap(), Dragonstash::ROOT_INO, &fi);
+            THEN("The root directory is marked as synced") {
+                auto flag_result = env.cache().begin_ro().test_flag(Dragonstash::ROOT_INO, Dragonstash::InodeFlag::SYNCED);
+                CHECK(flag_result.error() == 0);
+                REQUIRE(flag_result);
+                CHECK(*flag_result);
             }
-            check_reply_type(req, TestFuseReplyType::OPEN);
-            struct fuse_file_info fi = std::get<TestFuseReplyOpen>(req.reply_argv());
 
-            req = env.fuse().new_request();
-            fs.readdir(req, )
-        } */
+            THEN("Child directories are not marked as synced") {
+                auto txn = env.cache().begin_ro();
+                auto lookup_result = txn.lookup(Dragonstash::ROOT_INO, "books");
+                CHECK(lookup_result.error() == 0);
+                REQUIRE(lookup_result);
+
+                auto flag_result = txn.test_flag(*lookup_result, Dragonstash::InodeFlag::SYNCED);
+                CHECK(flag_result.error() == 0);
+                REQUIRE(flag_result);
+                CHECK(!*flag_result);
+            }
+
+            AND_WHEN("Setting the backend to disconnected") {
+                env.backend().set_connected(false);
+
+                AND_WHEN("Calling lookup on an existing entry") {
+                    auto req = env.fuse().new_request();
+                    fs.lookup(req, Dragonstash::ROOT_INO, "README.md");
+
+                    THEN("The call succeds and it returns attributes") {
+                        check_reply_type(req, TestFuseReplyType::ENTRY);
+                        auto entry = std::get<TestFuseReplyEntry>(req.reply_argv());
+                        CHECK(entry.attr.st_mode == (S_IFREG | S_IRUSR | S_IWUSR | S_IRGRP));
+                    }
+                }
+
+                AND_WHEN("Opening the root directory with opendir again") {
+                    auto req = env.fuse().new_request();
+                    struct fuse_file_info fi{};
+                    fs.opendir(req.wrap(), Dragonstash::ROOT_INO, &fi);
+
+                    THEN("The call succeeds and returns using fuse_reply_open") {
+                        check_reply_type(req, TestFuseReplyType::OPEN);
+                    }
+
+                    AND_WHEN("Iterating it") {
+                        check_reply_type(req, TestFuseReplyType::OPEN);
+                        fuse_file_info fi = std::get<TestFuseReplyOpen>(req.reply_argv());
+
+                        THEN("It returns data after dotdot") {
+                            // XXX: this heavily relies on implementation
+                            // details of the cache because we cannot
+                            // deserialise the dir entry format used by fus
+
+                            // To get the entry after dotdot, we have to ask
+                            // starting at the offset equal to the parent inode
+                            req = env.fuse().new_request();
+                            const std::size_t size = 4096;
+                            fs.readdir(req.wrap(), Dragonstash::ROOT_INO, size, Dragonstash::ROOT_INO, &fi);
+                            check_reply_type(req, TestFuseReplyType::BUF);
+                        }
+                    }
+                }
+
+                AND_WHEN("Opening an uncached directory with opendir") {
+                    auto req = env.fuse().new_request();
+                    fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "books");
+                    check_reply_type(req, TestFuseReplyType::ENTRY);
+
+                    ino_t dir_ino = std::get<TestFuseReplyEntry>(req.reply_argv()).ino;
+
+                    req = env.fuse().new_request();
+                    struct fuse_file_info fi{};
+                    fs.opendir(req.wrap(), dir_ino, &fi);
+
+                    THEN("The call succeeds") {
+                        check_reply_type(req, TestFuseReplyType::OPEN);
+                    }
+
+                    AND_WHEN("Iterating it") {
+                        check_reply_type(req, TestFuseReplyType::OPEN);
+                        fuse_file_info fi = std::get<TestFuseReplyOpen>(req.reply_argv());
+
+                        THEN("It returns EIO after dotdot") {
+                            // XXX: this heavily relies on implementation
+                            // details of the cache because we cannot
+                            // deserialise the dir entry format used by fus
+
+                            // To get the entry after dotdot, we have to ask
+                            // starting at the offset equal to the parent inode
+                            req = env.fuse().new_request();
+                            const std::size_t size = 4096;
+                            fs.readdir(req.wrap(), dir_ino, size, Dragonstash::ROOT_INO, &fi);
+                            check_reply_error(req, EIO);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
