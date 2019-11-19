@@ -30,7 +30,6 @@ authors named in the AUTHORS file.
 #include <fcntl.h>
 
 #include <cstring>
-#include <iostream>
 
 namespace Dragonstash {
 namespace Backend {
@@ -241,13 +240,11 @@ Result<Stat> LocalFilesystem::lstat(std::string_view path)
 {
     const Result<std::string> full_path = map_path(path);
     if (!full_path) {
-        std::cout << "lstat(" << path << ") -> (map_path) " << full_path.error() << std::endl;
         return Result<Stat>(FAILED, full_path.error());
     }
 
     struct stat buf{};
     if (::lstat(full_path->c_str(), &buf) < 0) {
-        std::cout << "lstat(" << path << ") -> (stat) " << errno << std::endl;
         return Result<Stat>(FAILED, errno);
     }
 
