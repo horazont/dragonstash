@@ -167,6 +167,7 @@ void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
     if (dir) {
         // if upstream is available, we can sync here; otherwise we go with what
         // we have cached.
+        (void)txn.start_dir_rewrite(ino);
         while (auto entry = (*dir)->readdir()) {
             std::string entry_path(backend_path);
             entry_path.reserve(entry_path.size() + entry->name.size() + 1);
@@ -183,6 +184,7 @@ void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
             (void)txn.emplace(ino, entry->name, info);
         }
         (void)txn.update_flags(ino, {InodeFlag::SYNCED});
+        (void)txn.finish_dir_rewrite();
     }
 
     fi->fh = 0;

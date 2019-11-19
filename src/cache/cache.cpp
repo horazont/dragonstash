@@ -927,6 +927,13 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
                 // do *not* remove, only update in-place
                 const auto buf = serialize_as<char>(inode);
                 ino_cursor.put(key_out, buf);
+                if (m_rewrite_inode_set) {
+                    // remove inode from deletion set since it was re-emplaced
+                    auto iter = m_rewrite_inode_set->find(old_ino);
+                    if (iter != m_rewrite_inode_set->end()) {
+                        m_rewrite_inode_set->erase(iter);
+                    }
+                }
                 return make_result(old_ino);
             }
 
@@ -1088,6 +1095,54 @@ Result<void> CacheTransactionRW::update_flags(ino_t ino, std::initializer_list<I
 
     const auto buf = serialize_as<char>(*inode);
     cursor.put(key_out, buf);
+
+    return make_result();
+}
+
+Result<void> CacheTransactionRW::start_dir_rewrite(ino_t dir)
+{
+    if (m_rewrite_inode_set) {
+        return make_result(FAILED, EALREADY);
+    }
+
+    auto ino_cursor = rw_transaction()->getRWCursor(db().tree_inode_key_db());
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+    if (ino_cursor.lower_bound(dir, key_out, value_out) == MDB_NOTFOUND) {
+        // nothing to do: not a directory or does not exist
+        // TODO: return proper error code if not a directory / nonexistent
+        return make_result();
+    }
+
+    struct ino_pair
+    {
+        ino_t parent;
+        ino_t child;
+    };
+
+    m_rewrite_inode_set = std::make_unique<std::set<ino_t>>();
+    std::set<ino_t> &ino_set = *m_rewrite_inode_set;
+    while (key_out.get_struct<ino_pair>().parent == dir) {
+        const ino_t entry_ino = key_out.get_struct<ino_pair>().child;
+        ino_set.insert(entry_ino);
+        if (ino_cursor.next(key_out, value_out) != 0) {
+            break;
+        }
+    }
+
+    return make_result();
+}
+
+Result<void> CacheTransactionRW::finish_dir_rewrite()
+{
+    if (!m_rewrite_inode_set) {
+        return make_result(FAILED, EBADFD);
+    }
+    std::unique_ptr<std::set<ino_t>> set_ptr = std::move(m_rewrite_inode_set);
+
+    for (ino_t ino: *set_ptr) {
+        (void)make_orphan(ino);
+    }
 
     return make_result();
 }

@@ -504,6 +504,9 @@ protected:
         return m_txn.get();
     }
 
+protected:
+    std::unique_ptr<std::set<ino_t>> m_rewrite_inode_set;
+
 public:
     /**
      * @brief Add a hook to the transaction.
@@ -759,6 +762,43 @@ public:
     [[nodiscard]] Result<void> update_flags(ino_t ino,
                                             std::initializer_list<InodeFlag> to_set,
                                             std::initializer_list<InodeFlag> to_clear = std::initializer_list<InodeFlag>());
+
+    /**
+     * @brief Start rewriting a complete directory
+     *
+     * @param dir The inode of the directory to rewrite.
+     *
+     * This marks all inodes in the directory for removal, but does not unlink
+     * them yet. The emplace() operation can be used to remove the mark for
+     * removal.
+     *
+     * Calling finish_dir_rewrite() unlinks all inodes from the directory which
+     * are marked for removal. Calling finish_dir_rewrite() right after
+     * start_dir_rewrite() can be used as a way to clear a directory completely.
+     *
+     * @note start and finish of the rewrite operation must happen in the same
+     * transaction; it is not possible to start a rewrite operation in a
+     * subtransaction and finish it in the parent transaction or vice versa.
+     *
+     * Error codes:
+     *
+     * - ENOTDIR: @a dir does not refer to a directory.
+     * - ENOENT: @a dir does not exist.
+     * - EALREADY: if a rewrite operation is already in progress in this
+     *   transaction
+     */
+    [[nodiscard]] Result<void> start_dir_rewrite(ino_t dir);
+
+    /**
+     * @brief Complete a directory rewrite operation.
+     *
+     * @see start_dir_rewrite()
+     *
+     * Error codes:
+     *
+     * - EBADFD: No rewrite operation is in progress.
+     */
+    [[nodiscard]] Result<void> finish_dir_rewrite();
 };
 
 }

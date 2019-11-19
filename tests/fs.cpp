@@ -284,6 +284,14 @@ SCENARIO("opendir and readdir") {
                 CHECK(!*flag_result);
             }
 
+            THEN("Dot cannot be looked up in the cache") {
+                CHECK(!env.cache().lookup(Dragonstash::ROOT_INO, "."));
+            }
+
+            THEN("Dotdot cannot be looked up in the cache") {
+                CHECK(!env.cache().lookup(Dragonstash::ROOT_INO, ".."));
+            }
+
             AND_WHEN("Setting the backend to disconnected") {
                 env.backend().set_connected(false);
 
@@ -380,6 +388,34 @@ SCENARIO("opendir and readdir") {
 
                     CHECK(*lookup_result_1 == *lookup_result_1_test);
                     CHECK(*lookup_result_2 == *lookup_result_2_test);
+                }
+            }
+
+            AND_WHEN("Removing a file from the backend and calling opendir again") {
+                env.backend().remove("README.md");
+
+                auto lookup_result_dir = env.cache().lookup(Dragonstash::ROOT_INO, "books");
+                REQUIRE(lookup_result_dir);
+
+                auto req = env.fuse().new_request();
+                struct fuse_file_info fi{};
+                fs.opendir(req.wrap(), Dragonstash::ROOT_INO, &fi);
+
+                AND_WHEN("Disconnecting the backend") {
+                    env.backend().set_connected(false);
+
+                    THEN("Lookup for the removed file returns ENOENT") {
+                        auto req = env.fuse().new_request();
+                        fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+                        check_reply_error(req, ENOENT);
+                    }
+
+                    THEN("The inode number for the directory is still intact") {
+                        auto lookup_result_dir_test = env.cache().lookup(Dragonstash::ROOT_INO, "books");
+                        REQUIRE(lookup_result_dir_test);
+
+                        CHECK(*lookup_result_dir == *lookup_result_dir_test);
+                    }
                 }
             }
         }

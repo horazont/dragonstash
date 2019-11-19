@@ -1712,3 +1712,108 @@ SCENARIO("Inode flags")
         }
     }
 }
+
+SCENARIO("Directory rewriting") {
+    TestSetup setup;
+    Dragonstash::Cache &cache = setup.cache();
+    Dragonstash::InodeAttributes dir_attr{
+        .mode = S_IFDIR
+    };
+    Dragonstash::InodeAttributes reg_attr{
+        .mode = S_IFREG
+    };
+
+    GIVEN("A cache with a few entries in the root") {
+        const Dragonstash::ino_t dir_ino = Dragonstash::ROOT_INO;
+        std::vector<ino_t> entry_inos;
+        {
+            auto txn = cache.begin_rw();
+            auto add_entry = [&entry_inos, &cache, dir_ino, &txn](std::string_view name, const Dragonstash::InodeAttributes &attr) {
+                auto emplace_result = txn.emplace(dir_ino, name, attr);
+                REQUIRE(emplace_result);
+                entry_inos.emplace_back(*emplace_result);
+            };
+            add_entry("e1", dir_attr);
+            add_entry("e2", reg_attr);
+            add_entry("e3", reg_attr);
+            CHECK(txn.commit());
+        }
+
+        WHEN("Rewriting the directory without re-emplacing entries") {
+            {
+                auto txn = cache.begin_rw();
+                auto start_result = txn.start_dir_rewrite(dir_ino);
+                CHECK(start_result.error() == 0);
+                CHECK(start_result);
+
+                auto end_result = txn.finish_dir_rewrite();
+                CHECK(end_result.error() == 0);
+                CHECK(end_result);
+                CHECK(txn.clean_orphans());
+                CHECK(txn.commit());
+            }
+
+            THEN("The entries are gone") {
+                for (ino_t entry_ino: entry_inos) {
+                    auto getattr_result = cache.getattr(entry_ino);
+                    CHECK(!getattr_result);
+                    CHECK(getattr_result.error() == ENOENT);
+                }
+            }
+
+            THEN("The entries do not show up in readdir") {
+                auto txn = cache.begin_ro();
+                auto readdir_result = txn.readdir(dir_ino, Dragonstash::INVALID_INO);
+                REQUIRE(readdir_result);
+                CHECK(readdir_result->name == ".");
+
+                readdir_result = txn.readdir(dir_ino, readdir_result->ino);
+                CHECK(!readdir_result);
+                CHECK(readdir_result.error() == 0);
+            }
+        }
+
+        WHEN("Rewriting the directory with re-emplacing some entries") {
+            {
+                auto txn = cache.begin_rw();
+                auto start_result = txn.start_dir_rewrite(dir_ino);
+                CHECK(start_result.error() == 0);
+                CHECK(start_result);
+
+                auto emplace_result = txn.emplace(dir_ino, "e1", dir_attr);
+                REQUIRE(emplace_result);
+                CHECK(*emplace_result == entry_inos[0]);
+
+                emplace_result = txn.emplace(dir_ino, "e3", reg_attr);
+                REQUIRE(emplace_result);
+                CHECK(*emplace_result == entry_inos[2]);
+
+                auto end_result = txn.finish_dir_rewrite();
+                CHECK(end_result.error() == 0);
+                CHECK(end_result);
+                CHECK(txn.clean_orphans());
+                CHECK(txn.commit());
+            }
+
+            THEN("The re-emplaced entries are there") {
+                {
+                    auto getattr_result = cache.getattr(entry_inos[0]);
+                    CHECK(getattr_result);
+                    CHECK(getattr_result.error() == 0);
+                }
+
+                {
+                    auto getattr_result = cache.getattr(entry_inos[2]);
+                    CHECK(getattr_result);
+                    CHECK(getattr_result.error() == 0);
+                }
+            }
+
+            THEN("The untouched entry is gone") {
+                auto getattr_result = cache.getattr(entry_inos[1]);
+                CHECK(!getattr_result);
+                CHECK(getattr_result.error() == ENOENT);
+            }
+        }
+    }
+}

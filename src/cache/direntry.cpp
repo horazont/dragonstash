@@ -1,5 +1,7 @@
 #include "cache/direntry.hpp"
 
+#include <cassert>
+
 namespace Dragonstash {
 
 Result<std::tuple<copyfree_wrap<DirEntry>, std::string_view> > DirEntry::parse_inplace(std::basic_string_view<std::byte> buf)
