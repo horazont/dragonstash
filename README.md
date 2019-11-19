@@ -14,17 +14,16 @@ yet. Here’s the roadmap and the current status.
 
 ### Done
 
-* Some internals.
+* Transparent caching of inodes (directories, symlinks, file metadata).
+* Local directory tree as source file system
+* EIO on missing (meta-)data
 
 ### To be done
 
 Everything, literally. But more specifically:
 
-* Transparent caching of inodes (directories, symlinks, file metadata).
 * Transparent block-wise caching of file contents
-* Local directory tree as source file system
 * SFTP server as source file system
-* -EIO on missing data
 * Limit number of blocks and inodes in the cache
 * Evict unused blocks when limit is reached
 * Understand fallocate to discard cached data
