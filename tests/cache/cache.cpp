@@ -616,10 +616,20 @@ SCENARIO("Storage and retrieval of symlinks") {
         require_result_ok(lnk_result);
 
         WHEN("Writing a destination to the link") {
-            auto write_result = cache.writelink(*lnk_result, "/foo");
+            std::string destination = "/foo";
+            auto write_result = cache.writelink(*lnk_result, destination);
 
             THEN("It succeeds") {
                 check_result_ok(write_result);
+            }
+
+            AND_WHEN("Calling getattr") {
+                auto getattr_result = cache.getattr(*lnk_result);
+                require_result_ok(getattr_result);
+
+                THEN("It returns the length of the link as size") {
+                    CHECK(getattr_result->attr.common.size == destination.size());
+                }
             }
         }
 

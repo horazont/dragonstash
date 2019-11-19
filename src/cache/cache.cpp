@@ -1091,18 +1091,25 @@ Result<void> CacheTransactionRW::clean_orphans()
 
 Result<void> CacheTransactionRW::writelink(ino_t ino, std::string_view dest)
 {
+    // TODO: figure out how to deal with st_size of links when the attributes
+    // are updated.
+    MDBOutVal key_out{};
     MDBOutVal value_out{};
-    if (rw_transaction()->get(db().links_db(), ino, value_out) == MDB_NOTFOUND) {
-        // check inode type first
-        auto stat_result = getattr(ino);
-        if (!stat_result) {
-            return copy_error(stat_result);
-        }
-        if ((stat_result->attr.mode & S_IFMT) != S_IFLNK) {
-            // not a symlink -> EINVAL
-            return make_result(FAILED, EINVAL);
-        }
+    auto ino_cursor = rw_transaction()->getCursor(db().inodes_db());
+    if (ino_cursor.find(ino, key_out, value_out) == MDB_NOTFOUND) {
+        return make_result(FAILED, ENOENT);
     }
+    auto inode = inode_from_lmdb(value_out);
+    if (!inode) {
+        return make_result(FAILED, EIO);
+    }
+    if ((inode->attr.mode & S_IFMT) != S_IFLNK) {
+        // not a symlink -> EINVAL
+        return make_result(FAILED, EINVAL);
+    }
+    inode->attr.common.size = dest.length();
+    auto buf = serialize_as<char>(*inode);
+    ino_cursor.put(key_out, buf);
     rw_transaction()->put(db().links_db(), ino, dest);
     return make_result();
 }
