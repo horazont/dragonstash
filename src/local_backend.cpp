@@ -223,9 +223,9 @@ Result<std::unique_ptr<File> > LocalFilesystem::open(std::string_view path,
 
 Result<std::unique_ptr<Dir>> LocalFilesystem::opendir(std::string_view path)
 {
-    const Result<std::string> full_path = map_path(path);
+    const auto full_path = map_path(path);
     if (!full_path) {
-        return make_result(FAILED, EINVAL);
+        return copy_error(full_path);
     }
 
     DIR *fd = ::opendir(full_path->c_str());
@@ -238,14 +238,14 @@ Result<std::unique_ptr<Dir>> LocalFilesystem::opendir(std::string_view path)
 
 Result<Stat> LocalFilesystem::lstat(std::string_view path)
 {
-    const Result<std::string> full_path = map_path(path);
+    const auto full_path = map_path(path);
     if (!full_path) {
-        return Result<Stat>(FAILED, full_path.error());
+        return copy_error(full_path);
     }
 
     struct stat buf{};
     if (::lstat(full_path->c_str(), &buf) < 0) {
-        return Result<Stat>(FAILED, errno);
+        return make_result(FAILED, errno);
     }
 
     return from_os_stat(buf);
@@ -259,7 +259,7 @@ Result<std::string> LocalFilesystem::readlink(std::string_view path)
     // remote on lstat-like operations)
     const auto full_path = map_path(path);
     if (!full_path) {
-        return make_result(FAILED, full_path.error());
+        return copy_error(full_path);
     }
 
     struct stat stat_buf{};
