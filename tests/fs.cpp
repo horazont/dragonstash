@@ -111,6 +111,21 @@ void check_reply_error(const TestFuseRequest &req, int err) {
     }
 }
 
+Dragonstash::Result<ino_t> lookup(TestFuseBackend &fuse,
+                                  Dragonstash::Filesystem &fs,
+                                  ino_t parent,
+                                  std::string_view name)
+{
+    auto req = fuse.new_request();
+    fs.lookup(req.wrap(), parent, name);
+    if (req.reply_type() == TestFuseReplyType::ERROR) {
+        return Dragonstash::make_result(Dragonstash::FAILED, std::get<TestFuseReplyErr>(req.reply_argv()));
+    }
+
+    REQUIRE(req.reply_type() == TestFuseReplyType::ENTRY);
+    return std::get<TestFuseReplyEntry>(req.reply_argv()).ino;
+}
+
 SCENARIO("lookup") {
     TestEnvironment env;
 
@@ -467,6 +482,89 @@ SCENARIO("opendir and readdir") {
                         fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
                         check_reply_error(req, ENOENT);
                     }
+                }
+            }
+        }
+    }
+}
+
+SCENARIO("readlink") {
+    TestEnvironment env;
+
+    GIVEN("A filesystem with default contents") {
+        env.with_default_contents();
+        Dragonstash::Filesystem &fs = env.fs();
+
+        auto dir_lookup_result = lookup(env.fuse(), env.fs(), Dragonstash::ROOT_INO, "books");
+        require_result_ok(dir_lookup_result);
+        const ino_t dir_ino = *dir_lookup_result;
+
+        auto link_lookup_result = lookup(env.fuse(), env.fs(), dir_ino, "best.epub");
+        require_result_ok(link_lookup_result);
+        const ino_t link_ino = *link_lookup_result;
+
+        WHEN("Calling readlink on a directory") {
+            auto req = env.fuse().new_request();
+            env.fs().readlink(req.wrap(), dir_ino);
+
+            THEN("EINVAL is returned") {
+                check_reply_error(req, EINVAL);
+            }
+        }
+
+        WHEN("Calling readlink on a file") {
+            auto lookup_result = lookup(env.fuse(), env.fs(), Dragonstash::ROOT_INO, "README.md");
+            require_result_ok(lookup_result);
+
+            auto req = env.fuse().new_request();
+            env.fs().readlink(req.wrap(), *lookup_result);
+
+            THEN("EINVAL is returned") {
+                check_reply_error(req, EINVAL);
+            }
+        }
+
+        WHEN("Calling readlink on a link") {
+            auto req = env.fuse().new_request();
+            env.fs().readlink(req.wrap(), link_ino);
+
+            THEN("The destination is returned") {
+                check_reply_type(req, TestFuseReplyType::READLINK);
+                auto dest = std::get<TestFuseReplyReadlink>(req.reply_argv());
+                CHECK(dest == "Hitchhiker's Guide To The Galaxy.epub");
+            }
+
+            AND_WHEN("Setting the backend to disconnected and calling readlink again") {
+                env.backend().set_connected(false);
+
+                auto req = env.fuse().new_request();
+                env.fs().readlink(req.wrap(), link_ino);
+
+                THEN("The destination is returned") {
+                    check_reply_type(req, TestFuseReplyType::READLINK);
+                    auto dest = std::get<TestFuseReplyReadlink>(req.reply_argv());
+                    CHECK(dest == "Hitchhiker's Guide To The Galaxy.epub");
+                }
+            }
+
+            AND_WHEN("Replacing the link with a directory, calling readlink and then setting the backend to disconnected") {
+                auto find_result = env.backend().find("/books");
+                require_result_ok(find_result);
+
+                auto dir = dynamic_cast<Dragonstash::Backend::InMemory::Directory*>(*find_result);
+                dir->remove("best.epub");
+                dir->emplace<Dragonstash::Backend::InMemory::File>("best.epub");
+
+                auto req = env.fuse().new_request();
+                env.fs().readlink(req.wrap(), link_ino);
+                check_reply_error(req, EINVAL);
+
+                env.backend().set_connected(false);
+
+                THEN("readlink returns an error (although it is unspecified which)") {
+                    auto req = env.fuse().new_request();
+                    env.fs().readlink(req.wrap(), link_ino);
+                    check_reply_type(req, TestFuseReplyType::ERROR);
                 }
             }
         }

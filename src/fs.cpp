@@ -155,6 +155,44 @@ void Filesystem::getattr(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi
     req.reply_attr(stbuf, 1.0);
 }
 
+void Filesystem::readlink(Fuse::Request &&req, fuse_ino_t ino)
+{
+    auto txn = m_cache.begin_rw();
+    auto path_result = txn.path(ino);
+    if (!path_result) {
+        req.reply_err(path_result.error());
+        return;
+    }
+    std::string_view backend_path;
+
+    if (path_result->empty()) {
+        backend_path = "/";
+    } else {
+        backend_path = *path_result;
+    }
+
+    auto link = m_backend_fs.readlink(backend_path);
+    if (link) {
+        (void)txn.writelink(ino, *link);
+        (void)txn.commit();
+    } else if (Backend::is_not_connected(link)) {
+        // return from cache
+        link = txn.readlink(ino);
+        if (!link) {
+            req.reply_err(link.error());
+            return;
+        }
+    } else {
+        // how to deal with errors here? unlinking is a safe way forward
+        (void)txn.unlink(ino);
+        (void)txn.commit();
+        req.reply_err(link.error());
+        return;
+    }
+
+    req.reply_readlink(link->c_str());
+}
+
 void Filesystem::opendir(Fuse::Request &&req, fuse_ino_t ino, fuse_file_info *fi)
 {
     auto txn = m_cache.begin_rw();

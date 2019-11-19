@@ -50,6 +50,7 @@ public:
     void lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view name);
     void forget(Fuse::Request &&req, fuse_ino_t ino, uint64_t nlookup);
     void getattr(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
+    void readlink(Fuse::Request &&req, fuse_ino_t ino);
     void opendir(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
     void readdir(Fuse::Request &&req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi);
     void releasedir(Fuse::Request &&req, fuse_ino_t ino, struct fuse_file_info *fi);
