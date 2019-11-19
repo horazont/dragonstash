@@ -238,6 +238,38 @@ SCENARIO("lookup") {
                 }
             }
         }
+
+        WHEN("Looking up an existing file") {
+            auto req = env.fuse().new_request();
+            fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+            check_reply_type(req, TestFuseReplyType::ENTRY);
+
+            AND_WHEN("Looking up the file again after removing it from the backend") {
+                env.backend().remove("README.md");
+
+                auto req = env.fuse().new_request();
+                fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+
+                THEN("The FS replies with ENOENT") {
+                    check_reply_error(req, ENOENT);
+                }
+
+                THEN("The file is removed from the cache") {
+                    check_result_error(env.cache().lookup(Dragonstash::ROOT_INO, "README.md"), ENOENT);
+                }
+
+                AND_WHEN("Setting the backend to disconnected and trying the lookup again") {
+                    env.backend().set_connected(false);
+
+                    auto req = env.fuse().new_request();
+                    fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+
+                    THEN("The lookup fails with EIO (because not fully synced)") {
+                        check_reply_error(req, EIO);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -412,6 +444,28 @@ SCENARIO("opendir and readdir") {
                         require_result_ok(lookup_result_dir_test);
 
                         CHECK(*lookup_result_dir == *lookup_result_dir_test);
+                    }
+                }
+            }
+
+            AND_WHEN("Removing a file from the backend and calling lookup") {
+                env.backend().remove("README.md");
+
+                auto req = env.fuse().new_request();
+                fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+                check_reply_error(req, ENOENT);
+
+                THEN("The file is removed from the cache") {
+                    check_result_error(env.cache().lookup(Dragonstash::ROOT_INO, "README.md"), ENOENT);
+                }
+
+                AND_WHEN("Disconnecting the backend") {
+                    env.backend().set_connected(false);
+
+                    THEN("Lookup for the removed file returns ENOENT") {
+                        auto req = env.fuse().new_request();
+                        fs.lookup(req.wrap(), Dragonstash::ROOT_INO, "README.md");
+                        check_reply_error(req, ENOENT);
                     }
                 }
             }

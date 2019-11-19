@@ -57,11 +57,6 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
     std::string_view backend_path_view(backend_path);
 
     auto stat_result = m_backend_fs.lstat(backend_path_view);
-    if (!stat_result && stat_result.error() != ENOTCONN) {
-        req.reply_err(stat_result.error());
-        return;
-    }
-
     if (stat_result) {
         auto cache_attrs = InodeAttributes::from_backend_stat(*stat_result);
 
@@ -75,7 +70,7 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
             cache_attrs,
             *ino_result
         };
-    } else {
+    } else if (Backend::is_not_connected(stat_result)) {
         // backend not connected, retrieve from cache if available
         ino_result = txn.lookup(parent, name);
         if (!ino_result) {
@@ -100,6 +95,24 @@ void Filesystem::lookup(Fuse::Request &&req, fuse_ino_t parent, std::string_view
         }
 
         e.attr = *attr_result;
+    } else {
+        // The backend reported an error, but it *is* connected. How to deal
+        // with this?
+        // In general, a backend error on lookup means, for all practical
+        // purposes, that the file does not exist.
+        // We will remove it from the cache (if it exists) and then return the
+        // error the backend returned. Note that this has the downside that we
+        // cannot cache the proper error message from the backend; we might want
+        // to do negative caching in the future, too.
+
+        // if unlinking fails, what are we going to do? (most likely this is
+        // just ENOENT anyways)
+        // TODO: add some debug logging for this type of stuff
+        (void)txn.unlink(parent, name);
+        (void)txn.commit();
+
+        req.reply_err(stat_result.error());
+        return;
     }
 
     auto lock_result = txn.lock(*ino_result);

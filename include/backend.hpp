@@ -34,6 +34,11 @@ authors named in the AUTHORS file.
 
 namespace Dragonstash::Backend {
 
+template <typename T>
+static inline bool is_not_connected(const Result<T> &result) {
+    return !result && result.error() == ENOTCONN;
+}
+
 struct Stat {
     uint32_t mode;
     uint64_t size;

@@ -1696,3 +1696,103 @@ SCENARIO("Directory rewriting") {
         }
     }
 }
+
+SCENARIO("Unlinking") {
+    TestSetup setup;
+    Dragonstash::Cache &cache = setup.cache();
+    Dragonstash::InodeAttributes dir_attr{
+        .mode = S_IFDIR
+    };
+    Dragonstash::InodeAttributes reg_attr{
+        .mode = S_IFREG
+    };
+
+    GIVEN("An empty cache") {
+        WHEN("Calling unlink on a nonexistent inode") {
+            auto txn = cache.begin_rw();
+            auto unlink_result = txn.unlink(nonexistent_inode);
+
+            THEN("It fails with ENOENT") {
+                check_result_error(unlink_result, ENOENT);
+            }
+        }
+
+        WHEN("Calling unlink on a nonexistent entry") {
+            auto txn = cache.begin_rw();
+            auto unlink_result = txn.unlink(Dragonstash::ROOT_INO, "ex");
+
+            THEN("It fails with ENOENT") {
+                check_result_error(unlink_result, ENOENT);
+            }
+        }
+    }
+
+    GIVEN("A cache with a few entries in the root") {
+        const Dragonstash::ino_t dir_ino = Dragonstash::ROOT_INO;
+        std::vector<ino_t> entry_inos;
+        {
+            auto txn = cache.begin_rw();
+            auto add_entry = [&entry_inos, &cache, dir_ino, &txn](std::string_view name, const Dragonstash::InodeAttributes &attr) {
+                auto emplace_result = txn.emplace(dir_ino, name, attr);
+                require_result_ok(emplace_result);
+                entry_inos.emplace_back(*emplace_result);
+            };
+            add_entry("e1", dir_attr);
+            add_entry("e2", reg_attr);
+            add_entry("e3", reg_attr);
+            check_result_ok(txn.commit());
+        }
+
+        WHEN("Calling unlink on a file by its inode") {
+            {
+                auto txn = cache.begin_rw();
+                check_result_ok(txn.unlink(entry_inos[1]));
+                check_result_ok(txn.commit());
+            }
+
+            THEN("Calling getattr on the file fails with ENOENT") {
+                check_result_error(cache.getattr(entry_inos[1]), ENOENT);
+            }
+
+            THEN("Calling getattr on the other files succeds") {
+                check_result_ok(cache.getattr(entry_inos[0]));
+                check_result_ok(cache.getattr(entry_inos[2]));
+            }
+        }
+
+        WHEN("Calling unlink on a file by its parent + inode") {
+            {
+                auto txn = cache.begin_rw();
+                check_result_ok(txn.unlink(Dragonstash::ROOT_INO, entry_inos[1]));
+                check_result_ok(txn.commit());
+            }
+
+            THEN("Calling getattr on the file fails with ENOENT") {
+                check_result_error(cache.getattr(entry_inos[1]), ENOENT);
+            }
+
+            THEN("Calling getattr on the other files succeds") {
+                check_result_ok(cache.getattr(entry_inos[0]));
+                check_result_ok(cache.getattr(entry_inos[2]));
+            }
+        }
+
+        WHEN("Calling unlink on a file by its parent + name") {
+            {
+                auto txn = cache.begin_rw();
+                auto result = txn.unlink(Dragonstash::ROOT_INO, "e2");
+                check_result_ok(result);
+                check_result_ok(txn.commit());
+            }
+
+            THEN("Calling getattr on the file fails with ENOENT") {
+                check_result_error(cache.getattr(entry_inos[1]), ENOENT);
+            }
+
+            THEN("Calling getattr on the other files succeds") {
+                check_result_ok(cache.getattr(entry_inos[0]));
+                check_result_ok(cache.getattr(entry_inos[2]));
+            }
+        }
+    }
+}

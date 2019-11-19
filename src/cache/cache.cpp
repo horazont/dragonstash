@@ -984,6 +984,43 @@ Result<ino_t> CacheTransactionRW::emplace(ino_t parent, std::string_view name,
     return ino;
 }
 
+Result<void> CacheTransactionRW::unlink(ino_t ino)
+{
+    auto orphan_result = make_orphan(ino);
+    if (!orphan_result) {
+        return copy_error(orphan_result);
+    }
+    return clean_orphans();
+}
+
+Result<void> CacheTransactionRW::unlink(ino_t parent, ino_t child)
+{
+    return unlink(child);
+}
+
+Result<void> CacheTransactionRW::unlink(ino_t parent, std::string_view name)
+{
+    auto cursor = rw_transaction()->getRWCursor(db().tree_name_key_db());
+    std::string key_buffer;
+    key_buffer.resize(sizeof(ino_t) + name.length());
+    memcpy(&key_buffer[0], &parent, sizeof(ino_t));
+    memcpy(&key_buffer[sizeof(ino_t)], name.data(), name.length());
+
+    MDBOutVal key_out{};
+    MDBOutVal value_out{};
+    if (cursor.find(key_buffer, key_out, value_out) != 0) {
+        return make_result(FAILED, ENOENT);
+    }
+
+    auto parse_result = DirEntry::parse_inplace(view(value_out));
+    assert(parse_result);
+    auto orphan_result = make_orphan(std::get<0>(*parse_result)->entry_ino);
+    if (!orphan_result) {
+        return copy_error(orphan_result);
+    }
+    return clean_orphans();
+}
+
 Result<void> CacheTransactionRW::clean_orphans()
 {
     auto &inode_locks = inode_in_memory_locks();
