@@ -38,6 +38,7 @@ authors named in the AUTHORS file.
 
 #include "cache/cache.hpp"
 #include "testutils/tempdir.hpp"
+#include "testutils/result.hpp"
 
 
 class TestSetup {
@@ -75,8 +76,7 @@ SCENARIO("Inode cache behaviour")
             auto result = cache.lookup(Dragonstash::ROOT_INO, "foo");
 
             THEN("it returns -ENOENT") {
-                CHECK(!result);
-                CHECK(result.error() == ENOENT);
+                check_result_error(result, ENOENT);
             }
         }
 
@@ -84,8 +84,7 @@ SCENARIO("Inode cache behaviour")
             auto result = cache.lookup(Dragonstash::INVALID_INO, "foo");
 
             THEN("it returns -EINVAL") {
-                CHECK(!result);
-                CHECK(result.error() == EINVAL);
+                check_result_error(result, EINVAL);
             }
         }
 
@@ -93,8 +92,7 @@ SCENARIO("Inode cache behaviour")
             auto result = cache.lookup(nonexistent_inode, "foo");
 
             THEN("it returns -ENOENT") {
-                CHECK(!result);
-                CHECK(result.error() == ENOENT);
+                check_result_error(result, ENOENT);
             }
         }
     }
@@ -110,7 +108,7 @@ SCENARIO("Inode cache behaviour")
                                         attr);
 
             THEN("the cache returns a new, valid inode number") {
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(*result != Dragonstash::ROOT_INO);
                 CHECK(*result != Dragonstash::INVALID_INO);
             }
@@ -119,9 +117,8 @@ SCENARIO("Inode cache behaviour")
                 auto lookup_result = cache.lookup(
                             Dragonstash::ROOT_INO,
                             "foo");
-                REQUIRE(result);
-                CHECK(lookup_result.error() == 0);
-                REQUIRE(lookup_result);
+                require_result_ok(result);
+                require_result_ok(lookup_result);
                 CHECK(*result == *lookup_result);
             }
 
@@ -129,8 +126,7 @@ SCENARIO("Inode cache behaviour")
                 auto lookup_result = cache.lookup(
                             Dragonstash::ROOT_INO,
                             "bar");
-                CHECK(!lookup_result);
-                CHECK(lookup_result.error() == ENOENT);
+                check_result_error(lookup_result, ENOENT);
             }
         }
     }
@@ -151,13 +147,13 @@ SCENARIO("Directory entry replacement")
         auto entry_result = cache.emplace(Dragonstash::ROOT_INO,
                                           "entry",
                                           attr);
-        REQUIRE(entry_result);
+        require_result_ok(entry_result);
         ino_t entry_ino = *entry_result;
 
         auto second_entry_result = cache.emplace(Dragonstash::ROOT_INO,
                                                  "other",
                                                  attr);
-        REQUIRE(second_entry_result);
+        require_result_ok(second_entry_result);
         ino_t second_entry_ino = *second_entry_result;
 
         WHEN("Emplacing a new inode with a conflicting name and equal format") {
@@ -165,7 +161,7 @@ SCENARIO("Directory entry replacement")
                                             "entry",
                                             attr);
             THEN("The same inode is returned") {
-                REQUIRE(new_result);
+                require_result_ok(new_result);
                 CHECK(*new_result == entry_ino);
             }
 
@@ -180,14 +176,14 @@ SCENARIO("Directory entry replacement")
                                             "entry",
                                             other_attr);
             THEN("A new inode is returned") {
-                REQUIRE(new_result);
+                require_result_ok(new_result);
                 CHECK(*new_result != entry_ino);
             }
 
             THEN("Lookup returns the new inode only") {
                 auto lookup_result = cache.lookup(Dragonstash::ROOT_INO,
                                                   "entry");
-                REQUIRE(lookup_result);
+                require_result_ok(lookup_result);
                 CHECK(*lookup_result == *new_result);
             }
 
@@ -211,7 +207,7 @@ SCENARIO("Reverse lookup")
         WHEN("Looking up the name of the root inode") {
             THEN("The name is empty") {
                 auto lookup_result = cache.name(Dragonstash::ROOT_INO);
-                REQUIRE(lookup_result);
+                require_result_ok(lookup_result);
                 CHECK(lookup_result->empty());
             }
         }
@@ -219,8 +215,7 @@ SCENARIO("Reverse lookup")
         WHEN("Looking up the name of a non-existent inode") {
             THEN("-ENOENT is returned") {
                 auto lookup_result = cache.name(nonexistent_inode);
-                CHECK(!lookup_result);
-                CHECK(lookup_result.error() == ENOENT);
+                check_result_error(lookup_result, ENOENT);
             }
         }
     }
@@ -229,14 +224,14 @@ SCENARIO("Reverse lookup")
         auto entry_result = cache.emplace(Dragonstash::ROOT_INO,
                                           "entry",
                                           attr);
-        REQUIRE(entry_result);
+        require_result_ok(entry_result);
         ino_t entry_ino = *entry_result;
 
         WHEN("Looking up the name of the inode") {
             auto lookup_result = cache.name(entry_ino);
 
             THEN("The correct name is returned") {
-                REQUIRE(lookup_result);
+                require_result_ok(lookup_result);
                 CHECK(*lookup_result == "entry");
             }
         }
@@ -253,8 +248,7 @@ SCENARIO("Attributes retrieval and storage")
             auto getattr_result = cache.getattr(nonexistent_inode);
 
             THEN("It returns -ENOENT") {
-                CHECK(!getattr_result);
-                CHECK(getattr_result.error() == ENOENT);
+                check_result_error(getattr_result, ENOENT);
             }
         }
 
@@ -262,23 +256,22 @@ SCENARIO("Attributes retrieval and storage")
             auto getattr_result = cache.getattr(Dragonstash::ROOT_INO);
 
             THEN("It returns success") {
-                CHECK(getattr_result);
-                CHECK(getattr_result.error() == 0);
+                check_result_ok(getattr_result);
             }
 
             THEN("It is a directory") {
-                REQUIRE(getattr_result);
+                require_result_ok(getattr_result);
                 CHECK((getattr_result->attr.mode & S_IFMT) == S_IFDIR);
             }
 
             THEN("Its UID and GID are the IDs of the current user") {
-                REQUIRE(getattr_result);
+                require_result_ok(getattr_result);
                 CHECK(getattr_result->attr.common.uid == getuid());
                 CHECK(getattr_result->attr.common.gid == getgid());
             }
 
             THEN("Its timestamps are close to now") {
-                REQUIRE(getattr_result);
+                require_result_ok(getattr_result);
                 auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
                 CHECK((now - getattr_result->attr.common.atime.tv_sec) < 10);
                 CHECK((now - getattr_result->attr.common.mtime.tv_sec) < 10);
@@ -286,7 +279,7 @@ SCENARIO("Attributes retrieval and storage")
             }
 
             THEN("Its size is zero") {
-                REQUIRE(getattr_result);
+                require_result_ok(getattr_result);
                 CHECK(getattr_result->attr.common.size == 0);
                 CHECK(getattr_result->attr.common.nblocks == 0);
             }
@@ -299,13 +292,11 @@ SCENARIO("Attributes retrieval and storage")
 
     GIVEN("A cache with a single additional directory entry") {
         auto emplace_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr);
-        CHECK(emplace_result.error() == 0);
-        REQUIRE(emplace_result);
+        require_result_ok(emplace_result);
 
         WHEN("Requesting attributes of that entry") {
             auto getattr_result = cache.getattr(*emplace_result);
-            CHECK(getattr_result.error() == 0);
-            REQUIRE(getattr_result);
+            require_result_ok(getattr_result);
 
             THEN("The attributes from emplace have been preserved") {
                 CHECK(getattr_result->attr.mode == attr.mode);
@@ -331,20 +322,17 @@ SCENARIO("Attributes retrieval and storage")
                 .mode = S_IFREG,
             };
             auto emplace2_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-            CHECK(emplace2_result.error() == 0);
-            REQUIRE(emplace2_result);
+            require_result_ok(emplace2_result);
             CHECK(*emplace2_result != *emplace_result);
 
             THEN("Calling getattr on the old entry fails with -ENOENT") {
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(!getattr_result);
-                CHECK(getattr_result.error() == ENOENT);
+                check_result_error(getattr_result, ENOENT);
             }
 
             THEN("Calling getattr on the new entry succeeds") {
                 auto getattr_result = cache.getattr(*emplace2_result);
-                CHECK(getattr_result.error() == 0);
-                REQUIRE(getattr_result);
+                require_result_ok(getattr_result);
                 CHECK(getattr_result->attr.mode == attr2.mode);
                 CHECK(getattr_result->attr.common.gid == attr2.common.gid);
                 CHECK(getattr_result->attr.common.uid == attr2.common.uid);
@@ -370,26 +358,22 @@ SCENARIO("Locked inodes")
             .mode = S_IFDIR
         };
         auto emplace_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr);
-        CHECK(emplace_result.error() == 0);
-        REQUIRE(emplace_result);
+        require_result_ok(emplace_result);
 
         WHEN("An inode is locked") {
             auto lock_result = cache.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            REQUIRE(lock_result);
+            require_result_ok(lock_result);
 
             THEN("The inode is not removed when the entry is replaced") {
                 Dragonstash::InodeAttributes attr2{
                     .mode = S_IFREG
                 };
                 auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-                CHECK(override_result.error() == 0);
-                REQUIRE(override_result);
+                require_result_ok(override_result);
                 CHECK(*override_result != *emplace_result);
 
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == 0);
-                CHECK(getattr_result);
+                check_result_ok(getattr_result);
             }
 
             THEN("The inode has the invalid inode as parent") {
@@ -397,12 +381,10 @@ SCENARIO("Locked inodes")
                     .mode = S_IFREG
                 };
                 auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-                CHECK(override_result.error() == 0);
-                CHECK(override_result);
+                check_result_ok(override_result);
 
                 auto parent_result = cache.parent(*emplace_result);
-                CHECK(parent_result.error() == 0);
-                CHECK(parent_result);
+                require_result_ok(parent_result);
                 CHECK(*parent_result == Dragonstash::INVALID_INO);
             }
 
@@ -411,12 +393,10 @@ SCENARIO("Locked inodes")
                     .mode = S_IFREG
                 };
                 auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-                CHECK(override_result.error() == 0);
-                CHECK(override_result);
+                check_result_ok(override_result);
 
                 auto name_result = cache.name(*emplace_result);
-                CHECK(name_result.error() == 0);
-                REQUIRE(name_result);
+                require_result_ok(name_result);
                 CHECK(name_result->empty());
             }
         }
@@ -424,31 +404,27 @@ SCENARIO("Locked inodes")
         WHEN("An inode is locked in the same transaction as its removal") {
             auto txn = cache.begin_rw();
             auto lock_result = txn.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            CHECK(lock_result);
+            check_result_ok(lock_result);
 
             THEN("The inode is not removed") {
                 Dragonstash::InodeAttributes attr2{
                     .mode = S_IFREG
                 };
                 auto override_result = txn.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-                CHECK(override_result.error() == 0);
-                REQUIRE(override_result);
+                require_result_ok(override_result);
                 CHECK(*override_result != *emplace_result);
 
-                CHECK(txn.commit());
+                check_result_ok(txn.commit());
 
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == 0);
-                CHECK(getattr_result);
+                check_result_ok(getattr_result);
             }
         }
 
         WHEN("A lock is rolled back") {
             auto txn = cache.begin_rw();
             auto lock_result = txn.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            CHECK(lock_result);
+            check_result_ok(lock_result);
             txn.abort();
 
             THEN("The inode is removed when it is replaced") {
@@ -456,129 +432,108 @@ SCENARIO("Locked inodes")
                     .mode = S_IFREG
                 };
                 auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-                CHECK(override_result.error() == 0);
-                REQUIRE(override_result);
+                require_result_ok(override_result);
                 CHECK(*override_result != *emplace_result);
 
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == ENOENT);
-                CHECK(!getattr_result);
+                check_result_error(getattr_result, ENOENT);
             }
         }
 
         WHEN("A removed, locked inode is unlocked") {
             auto lock_result = cache.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            REQUIRE(lock_result);
+            require_result_ok(lock_result);
 
             Dragonstash::InodeAttributes attr2{
                 .mode = S_IFREG
             };
             auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-            CHECK(override_result.error() == 0);
-            REQUIRE(override_result);
+            require_result_ok(override_result);
             CHECK(*override_result != *emplace_result);
 
             auto release_result = cache.release(*emplace_result);
-            CHECK(release_result.error() == 0);
-            REQUIRE(release_result);
+            require_result_ok(release_result);
 
             THEN("The inode should be removed") {
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == ENOENT);
-                CHECK(!getattr_result);
+                check_result_error(getattr_result, ENOENT);
             }
         }
 
         WHEN("A removed, locked inode is unlocked and the transaction is aborted") {
             auto lock_result = cache.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            REQUIRE(lock_result);
+            require_result_ok(lock_result);
 
             Dragonstash::InodeAttributes attr2{
                 .mode = S_IFREG
             };
             auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-            CHECK(override_result.error() == 0);
-            REQUIRE(override_result);
+            require_result_ok(override_result);
             CHECK(*override_result != *emplace_result);
 
             auto txn = cache.begin_rw();
             auto release_result = txn.release(*emplace_result);
-            CHECK(release_result.error() == 0);
-            REQUIRE(release_result);
+            require_result_ok(release_result);
             txn.abort();
 
             THEN("The inode should still exist") {
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == 0);
-                CHECK(getattr_result);
+                check_result_ok(getattr_result);
             }
         }
 
         WHEN("A locked inode is unlocked but not removed") {
             auto lock_result = cache.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            REQUIRE(lock_result);
+            require_result_ok(lock_result);
 
             auto release_result = cache.release(*emplace_result);
-            CHECK(release_result.error() == 0);
-            REQUIRE(release_result);
+            require_result_ok(release_result);
 
             THEN("The inode should still exist") {
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == 0);
-                CHECK(getattr_result);
+                check_result_ok(getattr_result);
             }
         }
 
         WHEN("A locked inode is unlocked and then replaced") {
             auto lock_result = cache.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            REQUIRE(lock_result);
+            require_result_ok(lock_result);
 
             auto release_result = cache.release(*emplace_result);
-            CHECK(release_result.error() == 0);
-            REQUIRE(release_result);
+            require_result_ok(release_result);
 
             Dragonstash::InodeAttributes attr2{
                 .mode = S_IFREG
             };
             auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-            CHECK(override_result.error() == 0);
-            REQUIRE(override_result);
+            require_result_ok(override_result);
             CHECK(*override_result != *emplace_result);
 
             THEN("The inode should be removed") {
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == ENOENT);
-                CHECK(!getattr_result);
+                check_result_error(getattr_result, ENOENT);
             }
         }
 
         WHEN("A locked inode is unlocked, but rolled back, and then replaced") {
             auto lock_result = cache.lock(*emplace_result);
-            CHECK(lock_result.error() == 0);
-            REQUIRE(lock_result);
+            require_result_ok(lock_result);
 
             auto txn = cache.begin_rw();
             auto release_result = txn.release(*emplace_result);
-            CHECK(release_result.error() == 0);
-            REQUIRE(release_result);
+            require_result_ok(release_result);
             txn.abort();
 
             Dragonstash::InodeAttributes attr2{
                 .mode = S_IFREG
             };
             auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-            CHECK(override_result.error() == 0);
-            REQUIRE(override_result);
+            require_result_ok(override_result);
             CHECK(*override_result != *emplace_result);
 
             THEN("The inode should still exist") {
                 auto getattr_result = cache.getattr(*emplace_result);
-                CHECK(getattr_result.error() == 0);
-                CHECK(getattr_result);
+                check_result_ok(getattr_result);
             }
         }
     }
@@ -597,28 +552,24 @@ SCENARIO("Cross-process cache")
                     .mode = S_IFDIR
                 };
                 auto emplace_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr);
-                CHECK(emplace_result.error() == 0);
-                REQUIRE(emplace_result);
+                require_result_ok(emplace_result);
                 locked_inode = *emplace_result;
 
                 auto lock_result = cache.lock(*emplace_result);
-                CHECK(lock_result.error() == 0);
-                REQUIRE(lock_result);
+                require_result_ok(lock_result);
 
                 Dragonstash::InodeAttributes attr2{
                     .mode = S_IFREG
                 };
                 auto override_result = cache.emplace(Dragonstash::ROOT_INO, "entry", attr2);
-                CHECK(override_result.error() == 0);
-                REQUIRE(override_result);
+                require_result_ok(override_result);
                 CHECK(*override_result != *emplace_result);
             }
 
             THEN("The inode is gone after the cache has been restored") {
                 Dragonstash::Cache cache(env.path());
                 auto getattr_result = cache.getattr(locked_inode);
-                CHECK(getattr_result.error() == ENOENT);
-                CHECK(!getattr_result);
+                check_result_error(getattr_result, ENOENT);
             }
         }
     }
@@ -633,8 +584,7 @@ SCENARIO("Storage and retrieval of symlinks") {
             auto read_result = cache.readlink(nonexistent_inode);
 
             THEN("It returns -ENOENT") {
-                CHECK(read_result.error() == ENOENT);
-                CHECK(!read_result);
+                check_result_error(read_result, ENOENT);
             }
         }
 
@@ -642,8 +592,7 @@ SCENARIO("Storage and retrieval of symlinks") {
             auto write_result = cache.writelink(nonexistent_inode, "/foo");
 
             THEN("It returns -ENOENT") {
-                CHECK(write_result.error() == ENOENT);
-                CHECK(!write_result);
+                check_result_error(write_result, ENOENT);
             }
         }
     }
@@ -663,17 +612,14 @@ SCENARIO("Storage and retrieval of symlinks") {
         auto lnk_result = cache.emplace(Dragonstash::ROOT_INO,
                                         "lnk", link_attrs);
 
-        CHECK(dir_result.error() == 0);
-        CHECK(dir_result);
-        CHECK(lnk_result.error() == 0);
-        CHECK(lnk_result);
+        require_result_ok(dir_result);
+        require_result_ok(lnk_result);
 
         WHEN("Writing a destination to the link") {
             auto write_result = cache.writelink(*lnk_result, "/foo");
 
             THEN("It succeeds") {
-                CHECK(write_result.error() == 0);
-                CHECK(write_result);
+                check_result_ok(write_result);
             }
         }
 
@@ -681,8 +627,7 @@ SCENARIO("Storage and retrieval of symlinks") {
             auto write_result = cache.writelink(*dir_result, "/foo");
 
             THEN("It fails with -EINVAL") {
-                CHECK(write_result.error() == EINVAL);
-                CHECK(!write_result);
+                check_result_error(write_result, EINVAL);
             }
         }
 
@@ -690,28 +635,24 @@ SCENARIO("Storage and retrieval of symlinks") {
             auto read_result = cache.readlink(*dir_result);
 
             THEN("It fails with -EINVAL") {
-                CHECK(read_result.error() == EINVAL);
-                CHECK(!read_result);
+                check_result_error(read_result, EINVAL);
             }
         }
 
         WHEN("Having written a destination on a link") {
             auto write_result = cache.writelink(*lnk_result, "/foo");
-            CHECK(write_result.error() == 0);
-            REQUIRE(write_result);
+            require_result_ok(write_result);
 
             THEN("It can be read back") {
                 auto read_result = cache.readlink(*lnk_result);
-                CHECK(read_result.error() == 0);
-                REQUIRE(read_result);
+                require_result_ok(read_result);
                 CHECK(*read_result == "/foo");
             }
         }
 
         WHEN("Replacing a link with a file") {
             auto write_result = cache.writelink(*lnk_result, "/foo");
-            CHECK(write_result.error() == 0);
-            REQUIRE(write_result);
+            require_result_ok(write_result);
 
             Dragonstash::InodeAttributes file_attrs = {
                 .mode = S_IFREG,
@@ -719,14 +660,12 @@ SCENARIO("Storage and retrieval of symlinks") {
 
             auto emplace_result = cache.emplace(Dragonstash::ROOT_INO,
                                                 "lnk", file_attrs);
-            CHECK(emplace_result.error() == 0);
-            REQUIRE(emplace_result);
+            require_result_ok(emplace_result);
             CHECK(*emplace_result != *lnk_result);
 
             THEN("The link is not readable anymore") {
                 auto read_result = cache.readlink(*lnk_result);
-                CHECK(read_result.error() == ENOENT);
-                CHECK(!read_result);
+                check_result_error(read_result, ENOENT);
             }
         }
     }
@@ -742,26 +681,23 @@ SCENARIO("Nested directories") {
 
         auto dir1_result = cache.emplace(Dragonstash::ROOT_INO,
                                          "dir", dir1_attrs);
-        CHECK(dir1_result.error() == 0);
-        CHECK(dir1_result);
+        require_result_ok(dir1_result);
 
         WHEN("Emplacing a directory inside the first one") {
             auto dir2_result = cache.emplace(*dir1_result,
                                              "subdir", dir1_attrs);
-            CHECK(dir2_result.error() == 0);
-            CHECK(dir2_result);
+            require_result_ok(dir2_result);
 
             THEN("It is not visible in the root directory") {
                 auto lookup_result = cache.lookup(Dragonstash::ROOT_INO,
                                                   "subdir");
-                CHECK(lookup_result.error() == ENOENT);
-                CHECK(!lookup_result);
+                check_result_error(lookup_result, ENOENT);
             }
 
             THEN("It is visible in the first directory") {
                 auto lookup_result = cache.lookup(*dir1_result,
                                                   "subdir");
-                CHECK(lookup_result.error() == 0);
+                require_result_ok(lookup_result);
                 CHECK(*lookup_result == *dir2_result);
             }
         }
@@ -769,8 +705,7 @@ SCENARIO("Nested directories") {
         WHEN("Emplacing a file over a directory with a child") {
             auto dir2_result = cache.emplace(*dir1_result,
                                              "subdir", dir1_attrs);
-            CHECK(dir2_result.error() == 0);
-            CHECK(dir2_result);
+            require_result_ok(dir2_result);
 
             Dragonstash::InodeAttributes file_attrs{
                 .mode = S_IFREG,
@@ -778,17 +713,14 @@ SCENARIO("Nested directories") {
 
             auto emplace_result = cache.emplace(Dragonstash::ROOT_INO,
                                                 "dir", file_attrs);
-            CHECK(emplace_result.error() == 0);
-            CHECK(emplace_result);
+            require_result_ok(emplace_result);
 
             THEN("The subdirectory is gone") {
                 auto lookup_result = cache.lookup(*dir1_result, "subdir");
-                CHECK(lookup_result.error() == ENOENT);
-                CHECK(!lookup_result);
+                check_result_error(lookup_result, ENOENT);
 
                 auto getattr_result = cache.getattr(*dir2_result);
-                CHECK(getattr_result.error() == ENOENT);
-                CHECK(!getattr_result);
+                check_result_error(getattr_result, ENOENT);
             }
         }
     }
@@ -806,14 +738,12 @@ SCENARIO("Reading directories") {
                 Dragonstash::Result<Dragonstash::DirectoryEntry> result = make_result(Dragonstash::FAILED, 0);
 
                 result = txn.readdir(Dragonstash::ROOT_INO, 0);
-                CHECK(result.error() == 0);
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(result->name == ".");
                 CHECK(result->ino == Dragonstash::ROOT_INO);
 
                 result = txn.readdir(Dragonstash::ROOT_INO, result->ino);
-                CHECK(result.error() == 0);
-                CHECK(!result);
+                check_result_error(result, 0);
             }
         }
     }
@@ -828,8 +758,7 @@ SCENARIO("Reading directories") {
 
         auto parent_result = cache.emplace(Dragonstash::ROOT_INO,
                                            "dir", parent_attrs);
-        CHECK(parent_result.error() == 0);
-        REQUIRE(parent_result);
+        require_result_ok(parent_result);
 
         WHEN("Iterating readdir on that directory") {
             auto txn = cache.begin_ro();
@@ -838,20 +767,17 @@ SCENARIO("Reading directories") {
                 Dragonstash::Result<Dragonstash::DirectoryEntry> result = make_result(Dragonstash::FAILED, 0);
 
                 result = txn.readdir(*parent_result, 0);
-                CHECK(result.error() == 0);
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(result->name == ".");
                 CHECK(result->ino == *parent_result);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(result->name == "..");
                 CHECK(result->ino == Dragonstash::ROOT_INO);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
-                CHECK(!result);
+                check_result_error(result, 0);
             }
         }
     }
@@ -875,31 +801,26 @@ SCENARIO("Reading directories") {
 
         auto parent_result = cache.emplace(Dragonstash::ROOT_INO,
                                            "dir", parent_attrs);
-        CHECK(parent_result.error() == 0);
-        REQUIRE(parent_result);
+        require_result_ok(parent_result);
 
         auto ent1_result = cache.emplace(*parent_result,
                                          "f1", f1_attrs);
-        CHECK(ent1_result.error() == 0);
-        REQUIRE(ent1_result);
+        require_result_ok(ent1_result);
 
         auto ent2_result = cache.emplace(*parent_result,
                                          "f2", f2_attrs);
-        CHECK(ent2_result.error() == 0);
-        REQUIRE(ent2_result);
+        require_result_ok(ent2_result);
 
         auto ent3_result = cache.emplace(*parent_result,
                                          "f3", f3_attrs);
-        CHECK(ent3_result.error() == 0);
-        REQUIRE(ent3_result);
+        require_result_ok(ent3_result);
 
         WHEN("Using readdir initially") {
             auto txn = cache.begin_ro();
             auto readdir_result = txn.readdir(*parent_result, 0);
 
             THEN("It returns dot") {
-                CHECK(readdir_result.error() == 0);
-                REQUIRE(readdir_result);
+                require_result_ok(readdir_result);
                 CHECK(readdir_result->name == ".");
                 CHECK(!readdir_result->complete);
                 CHECK(readdir_result->ino == *parent_result);
@@ -912,38 +833,32 @@ SCENARIO("Reading directories") {
                 Dragonstash::Result<Dragonstash::DirectoryEntry> result = make_result(Dragonstash::FAILED, 0);
 
                 result = txn.readdir(*parent_result, 0);
-                CHECK(result.error() == 0);
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(result->name == ".");
                 CHECK(result->ino == *parent_result);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(result->name == "..");
                 CHECK(result->ino == Dragonstash::ROOT_INO);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
                 REQUIRE(result);
                 CHECK(result->name == "f1");
                 CHECK(result->ino == *ent1_result);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
                 REQUIRE(result);
                 CHECK(result->name == "f2");
                 CHECK(result->ino == *ent2_result);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
                 REQUIRE(result);
                 CHECK(result->name == "f3");
                 CHECK(result->ino == *ent3_result);
 
                 result = txn.readdir(*parent_result, result->ino);
-                CHECK(result.error() == 0);
-                CHECK(!result);
+                check_result_error(result, 0);
             }
         }
     }
@@ -962,32 +877,31 @@ SCENARIO("Path reconstruction") {
         };
 
         auto d1_r = cache.emplace(Dragonstash::ROOT_INO, "d1", dir_attrs);
-        REQUIRE(d1_r);
+        require_result_ok(d1_r);
 
         auto d2_r = cache.emplace(Dragonstash::ROOT_INO, "d2", dir_attrs);
-        REQUIRE(d2_r);
+        require_result_ok(d2_r);
 
         auto f1_r = cache.emplace(Dragonstash::ROOT_INO, "f1", file_attrs);
-        REQUIRE(f1_r);
+        require_result_ok(f1_r);
 
         auto d1_f1_r = cache.emplace(*d1_r, "f1", file_attrs);
-        REQUIRE(d1_f1_r);
+        require_result_ok(d1_f1_r);
 
         auto d1_d1_r = cache.emplace(*d1_r, "d1", dir_attrs);
-        REQUIRE(d1_d1_r);
+        require_result_ok(d1_d1_r);
 
         auto d1_d1_f1_r = cache.emplace(*d1_d1_r, "f1", file_attrs);
-        REQUIRE(d1_d1_f1_r);
+        require_result_ok(d1_d1_f1_r);
 
         auto d2_f1_r = cache.emplace(*d2_r, "f1", file_attrs);
-        REQUIRE(d2_f1_r);
+        require_result_ok(d2_f1_r);
 
         WHEN("Reconstructing path of the root inode") {
             auto path = cache.path(Dragonstash::ROOT_INO);
 
             THEN("It should succeed and be empty") {
-                CHECK(path.error() == 0);
-                REQUIRE(path);
+                require_result_ok(path);
                 CHECK(path->empty());
             }
         }
@@ -996,8 +910,7 @@ SCENARIO("Path reconstruction") {
             auto path = cache.path(*d1_r);
 
             THEN("It should succeed and be correct") {
-                CHECK(path.error() == 0);
-                REQUIRE(path);
+                require_result_ok(path);
                 CHECK(*path == "/d1");
             }
         }
@@ -1006,8 +919,7 @@ SCENARIO("Path reconstruction") {
             auto path = cache.path(*f1_r);
 
             THEN("It should succeed and be correct") {
-                CHECK(path.error() == 0);
-                REQUIRE(path);
+                require_result_ok(path);
                 CHECK(*path == "/f1");
             }
         }
@@ -1016,8 +928,7 @@ SCENARIO("Path reconstruction") {
             auto path = cache.path(*d2_f1_r);
 
             THEN("It should succeed and be correct") {
-                CHECK(path.error() == 0);
-                REQUIRE(path);
+                require_result_ok(path);
                 CHECK(*path == "/d2/f1");
             }
         }
@@ -1026,8 +937,7 @@ SCENARIO("Path reconstruction") {
             auto path = cache.path(*d1_d1_f1_r);
 
             THEN("It should succeed and be correct") {
-                CHECK(path.error() == 0);
-                REQUIRE(path);
+                require_result_ok(path);
                 CHECK(*path == "/d1/d1/f1");
             }
         }
@@ -1047,21 +957,21 @@ SCENARIO("Single-thread Concurrency") {
         };
 
         auto d1_r = cache.emplace(Dragonstash::ROOT_INO, "d1", dir_attrs);
-        REQUIRE(d1_r);
+        require_result_ok(d1_r);
 
         auto d2_r = cache.emplace(Dragonstash::ROOT_INO, "d2", dir_attrs);
-        REQUIRE(d2_r);
+        require_result_ok(d2_r);
 
         auto f1_r = cache.emplace(Dragonstash::ROOT_INO, "f1", file_attrs);
-        REQUIRE(f1_r);
+        require_result_ok(f1_r);
 
         WHEN("Attempting to use multiple readers concurrently") {
             auto r1 = cache.begin_ro();
             auto r2 = cache.begin_ro();
 
             THEN("It works") {
-                CHECK(r1.lookup(Dragonstash::ROOT_INO, "d1"));
-                CHECK(r2.lookup(Dragonstash::ROOT_INO, "d2"));
+                check_result_ok(r1.lookup(Dragonstash::ROOT_INO, "d1"));
+                check_result_ok(r2.lookup(Dragonstash::ROOT_INO, "d2"));
             }
         }
 
@@ -1070,8 +980,8 @@ SCENARIO("Single-thread Concurrency") {
             auto w1 = cache.begin_rw();
 
             THEN("It works") {
-                CHECK(r1.lookup(Dragonstash::ROOT_INO, "d1"));
-                CHECK(w1.lookup(Dragonstash::ROOT_INO, "d2"));
+                check_result_ok(r1.lookup(Dragonstash::ROOT_INO, "d1"));
+                check_result_ok(w1.lookup(Dragonstash::ROOT_INO, "d2"));
             }
         }
 
@@ -1081,37 +991,36 @@ SCENARIO("Single-thread Concurrency") {
 
             THEN("The reader is unaffected by the writer") {
                 auto emplace_result = w1.emplace(*d1_r, "foo", file_attrs);
-                CHECK(emplace_result);
+                check_result_ok(emplace_result);
 
                 auto lookup_result = r1.lookup(*d1_r, "foo");
-                CHECK(!lookup_result);
+                check_result_error(lookup_result, ENOENT);
             }
 
             THEN("The reader does not see the writer's results after commit") {
                 auto emplace_result = w1.emplace(*d1_r, "foo", file_attrs);
-                CHECK(emplace_result);
-                CHECK(w1.commit());
+                check_result_ok(emplace_result);
+                check_result_ok(w1.commit());
 
                 auto lookup_result = r1.lookup(*d1_r, "foo");
-                CHECK(!lookup_result);
+                check_result_error(lookup_result, ENOENT);
             }
 
             THEN("A new reader does see the writer's results after commit") {
                 auto emplace_result = w1.emplace(*d1_r, "foo", file_attrs);
-                CHECK(emplace_result);
-                CHECK(w1.commit());
+                check_result_ok(emplace_result);
+                check_result_ok(w1.commit());
 
                 auto lookup_result = r1.lookup(*d1_r, "foo");
-                CHECK(!lookup_result);
+                check_result_error(lookup_result, ENOENT);
 
                 auto r2 = cache.begin_ro();
                 lookup_result = r2.lookup(*d1_r, "foo");
-                CHECK(lookup_result.error() == 0);
-                REQUIRE(lookup_result);
+                require_result_ok(lookup_result);
                 CHECK(*lookup_result == *emplace_result);
 
                 lookup_result = r1.lookup(*d1_r, "foo");
-                CHECK(!lookup_result);
+                check_result_error(lookup_result, ENOENT);
             }
         }
     }
@@ -1131,37 +1040,33 @@ SCENARIO("Read-committed isolation level for locks") {
         };
 
         auto d1_r = cache.emplace(Dragonstash::ROOT_INO, "d1", dir_attrs);
-        CHECK(d1_r.error() == 0);
-        REQUIRE(d1_r);
+        require_result_ok(d1_r);
 
         auto d2_r = cache.emplace(Dragonstash::ROOT_INO, "d2", dir_attrs);
-        CHECK(d2_r.error() == 0);
-        REQUIRE(d2_r);
+        require_result_ok(d2_r);
 
         auto lock_result = cache.lock(*d1_r);
-        CHECK(lock_result.error() == 0);
-        REQUIRE(lock_result);
+        require_result_ok(lock_result);
 
         lock_result = cache.lock(*d2_r);
-        CHECK(lock_result.error() == 0);
-        REQUIRE(lock_result);
+        require_result_ok(lock_result);
 
         WHEN("A writer overrides the inode, releases the lock and the reader looks up the inode before commit") {
             auto r1 = cache.begin_ro();
             auto w1 = cache.begin_rw();
 
             auto release_result = w1.release(*d2_r, 1);
-            CHECK(release_result);
+            check_result_ok(release_result);
 
             auto emplace_result = w1.emplace(Dragonstash::ROOT_INO, "d2", file_attrs);
-            REQUIRE(emplace_result);
+            require_result_ok(emplace_result);
 
             auto w_lookup_result = w1.lookup(Dragonstash::ROOT_INO, "d2");
-            REQUIRE(w_lookup_result);
+            require_result_ok(w_lookup_result);
             CHECK(*w_lookup_result == *emplace_result);
 
             auto r_lookup_result = r1.lookup(Dragonstash::ROOT_INO, "d1");
-            REQUIRE(r_lookup_result);
+            require_result_ok(r_lookup_result);
 
             THEN("The lookup still shows the old inode") {
                 CHECK(*r_lookup_result == *d1_r);
@@ -1185,30 +1090,28 @@ SCENARIO("Read-committed isolation level for locks") {
             auto w1 = cache.begin_rw();
 
             auto release_result = w1.release(*d2_r, 1);
-            CHECK(release_result);
+            check_result_ok(release_result);
 
             auto emplace_result = w1.emplace(Dragonstash::ROOT_INO, "d2", file_attrs);
-            REQUIRE(emplace_result);
-            CHECK(w1.clean_orphans());
+            require_result_ok(emplace_result);
+            check_result_ok(w1.clean_orphans());
 
             auto w_lookup_result = w1.lookup(Dragonstash::ROOT_INO, "d2");
-            REQUIRE(w_lookup_result);
+            require_result_ok(w_lookup_result);
             CHECK(*w_lookup_result == *emplace_result);
 
             auto w_getattr_result = w1.getattr(*d2_r);
-            CHECK(w_getattr_result.error() == ENOENT);
-            CHECK(!w_getattr_result);
+            check_result_error(w_getattr_result, ENOENT);
 
             auto r_lookup_result = r1.lookup(Dragonstash::ROOT_INO, "d2");
-            REQUIRE(r_lookup_result);
-            REQUIRE(w1.commit());
+            require_result_ok(r_lookup_result);
+            require_result_ok(w1.commit());
 
             THEN("The lock fails with ESTALE") {
                 CHECK(*r_lookup_result == *d2_r);
 
                 auto lock_result = r1.lock(*r_lookup_result);
-                CHECK(lock_result.error() == ESTALE);
-                CHECK(!lock_result);
+                check_result_error(lock_result, ESTALE);
             }
         }
     }
@@ -1237,7 +1140,7 @@ SCENARIO("Transaction hooks") {
             CHECK(!stage_2_ran);
 
             AND_WHEN("The transaction commits") {
-                CHECK(txn.commit());
+                check_result_ok(txn.commit());
 
                 THEN("Both stages are called") {
                     CHECK(stage_1_ran);
@@ -1294,12 +1197,8 @@ SCENARIO("Transaction hooks") {
             AND_WHEN("The transaction attempts to commit") {
                 auto commit_result = txn.commit();
 
-                THEN("The commit fails") {
-                    CHECK(!commit_result);
-                }
-
-                THEN("The error code is propagated") {
-                    CHECK(commit_result.error() == random_errno);
+                THEN("The commit fails with the given error") {
+                    check_result_error(commit_result, random_errno);
                 }
 
                 THEN("Stage 1 is called") {
@@ -1315,11 +1214,10 @@ SCENARIO("Transaction hooks") {
                 }
 
                 THEN("Changes made by the transaction are not visible") {
-                    CHECK(emplace_result);
+                    check_result_ok(emplace_result);
 
                     auto lookup_result = cache.lookup(Dragonstash::ROOT_INO, "test");
-                    CHECK(lookup_result.error() == ENOENT);
-                    CHECK(!lookup_result);
+                    check_result_error(lookup_result, ENOENT);
                 }
 
                 THEN("The transaction has stopped") {
@@ -1342,11 +1240,10 @@ SCENARIO("Transaction hooks") {
                 }
 
                 THEN("Changes made by the transaction are not visible") {
-                    CHECK(emplace_result);
+                    check_result_ok(emplace_result);
 
                     auto lookup_result = cache.lookup(Dragonstash::ROOT_INO, "test");
-                    CHECK(lookup_result.error() == ENOENT);
-                    CHECK(!lookup_result);
+                    check_result_error(lookup_result, ENOENT);
                 }
 
                 THEN("Rollback is called") {
@@ -1408,7 +1305,7 @@ SCENARIO("Transaction hooks") {
                 auto commit_result = txn.commit();
 
                 THEN("Commit fails") {
-                    CHECK(!commit_result);
+                    check_result_error(commit_result, EINVAL);
                 }
 
                 THEN("Stage 1 runs for c1 and c2 in the correct order") {
@@ -1464,8 +1361,7 @@ SCENARIO("Transaction nesting") {
         };
 
         auto d1_r = cache.emplace(Dragonstash::ROOT_INO, "d1", dir_attrs);
-        CHECK(d1_r.error() == 0);
-        REQUIRE(d1_r);
+        require_result_ok(d1_r);
 
         WHEN("Locking an inode in both the parent and the nested transaction") {
             auto txn = cache.begin_rw();
@@ -1474,12 +1370,12 @@ SCENARIO("Transaction nesting") {
             auto lock2_result = txn2.lock(*d1_r);
 
             THEN("Both locks succeed") {
-                CHECK(lock1_result);
-                CHECK(lock2_result);
+                check_result_ok(lock1_result);
+                check_result_ok(lock2_result);
             }
 
             THEN("The file can be released twice from the inner transaction") {
-                CHECK(txn2.release(*d1_r, 2));
+                check_result_ok(txn2.release(*d1_r, 2));
             }
 
             THEN("The file can be released only once after the inner transaction has been aborted") {
@@ -1487,12 +1383,12 @@ SCENARIO("Transaction nesting") {
                 CHECK_THROWS_WITH(
                             txn.release(*d1_r, 2),
                             Catch::Matchers::Contains("counter below zero"));
-                CHECK(txn.release(*d1_r, 1));
+                check_result_ok(txn.release(*d1_r, 1));
             }
 
             THEN("The file can be released twice after the inner transaction has committed") {
-                CHECK(txn2.commit());
-                CHECK(txn.release(*d1_r, 2));
+                check_result_ok(txn2.commit());
+                check_result_ok(txn.release(*d1_r, 2));
             }
         }
 
@@ -1521,14 +1417,14 @@ SCENARIO("Transaction nesting") {
             }
 
             AND_WHEN("Comitting the nested transaction") {
-                CHECK(txn2.commit());
+                check_result_ok(txn2.commit());
 
                 THEN("The handler is not executed") {
                     CHECK(!signal);
                 }
 
                 AND_WHEN("Comitting the parent transaction") {
-                    CHECK(txn.commit());
+                    check_result_ok(txn.commit());
 
                     THEN("The handler is not executed") {
                         CHECK(!signal);
@@ -1568,7 +1464,7 @@ SCENARIO("Transaction nesting") {
                 }
 
                 AND_WHEN("Committing the parent transaction") {
-                    CHECK(txn.commit());
+                    check_result_ok(txn.commit());
 
                     THEN("Neither stage is called") {
                         CHECK(!stage_1_ran);
@@ -1587,7 +1483,7 @@ SCENARIO("Transaction nesting") {
             }
 
             AND_WHEN("Committing the nested transaction") {
-                CHECK(txn2.commit());
+                check_result_ok(txn2.commit());
 
                 THEN("Neither stage is called") {
                     CHECK(!stage_1_ran);
@@ -1595,7 +1491,7 @@ SCENARIO("Transaction nesting") {
                 }
 
                 AND_WHEN("Committing the parent transaction") {
-                    CHECK(txn.commit());
+                    check_result_ok(txn.commit());
 
                     THEN("Both stages are called") {
                         CHECK(stage_1_ran);
@@ -1628,8 +1524,7 @@ SCENARIO("Inode flags")
                                         Dragonstash::InodeFlag::SYNCED);
 
             THEN("It succeeds and returns false") {
-                CHECK(result.error() == 0);
-                REQUIRE(result);
+                require_result_ok(result);
                 CHECK(!*result);
             }
         }
@@ -1640,8 +1535,7 @@ SCENARIO("Inode flags")
                                         Dragonstash::InodeFlag::SYNCED);
 
             THEN("It fails with ENOENT") {
-                CHECK(result.error() == ENOENT);
-                CHECK(!result);
+                check_result_error(result, ENOENT);
             }
         }
 
@@ -1651,8 +1545,7 @@ SCENARIO("Inode flags")
                                            {Dragonstash::InodeFlag::SYNCED});
 
             THEN("It fails with ENOENT") {
-                CHECK(result.error() == ENOENT);
-                CHECK(!result);
+                check_result_error(result, ENOENT);
             }
         }
 
@@ -1662,12 +1555,11 @@ SCENARIO("Inode flags")
                 auto txn = cache.begin_rw();
                 result = txn.update_flags(Dragonstash::ROOT_INO,
                                           {Dragonstash::InodeFlag::SYNCED});
-                (void)txn.commit();
+                check_result_ok(txn.commit());
             }
 
             THEN("It succeeds") {
-                CHECK(result.error() == 0);
-                CHECK(result);
+                check_result_ok(result);
             }
 
             AND_WHEN("Testing that flag") {
@@ -1676,8 +1568,7 @@ SCENARIO("Inode flags")
                                             Dragonstash::InodeFlag::SYNCED);
 
                 THEN("It succeeds and returns true") {
-                    CHECK(result.error() == 0);
-                    REQUIRE(result);
+                    require_result_ok(result);
                     CHECK(*result);
                 }
             }
@@ -1689,12 +1580,11 @@ SCENARIO("Inode flags")
                     result = txn.update_flags(Dragonstash::ROOT_INO,
                                               {},
                                               {Dragonstash::InodeFlag::SYNCED});
-                    (void)txn.commit();
+                    check_result_ok(txn.commit());
                 }
 
                 THEN("It succeds") {
-                    CHECK(result.error() == 0);
-                    CHECK(result);
+                    check_result_ok(result);
                 }
 
                 AND_WHEN("Testing that flag") {
@@ -1703,8 +1593,7 @@ SCENARIO("Inode flags")
                                                 Dragonstash::InodeFlag::SYNCED);
 
                     THEN("It succeds and returns false") {
-                        CHECK(result.error() == 0);
-                        REQUIRE(result);
+                        require_result_ok(result);
                         CHECK(!*result);
                     }
                 }
@@ -1730,46 +1619,42 @@ SCENARIO("Directory rewriting") {
             auto txn = cache.begin_rw();
             auto add_entry = [&entry_inos, &cache, dir_ino, &txn](std::string_view name, const Dragonstash::InodeAttributes &attr) {
                 auto emplace_result = txn.emplace(dir_ino, name, attr);
-                REQUIRE(emplace_result);
+                require_result_ok(emplace_result);
                 entry_inos.emplace_back(*emplace_result);
             };
             add_entry("e1", dir_attr);
             add_entry("e2", reg_attr);
             add_entry("e3", reg_attr);
-            CHECK(txn.commit());
+            check_result_ok(txn.commit());
         }
 
         WHEN("Rewriting the directory without re-emplacing entries") {
             {
                 auto txn = cache.begin_rw();
                 auto start_result = txn.start_dir_rewrite(dir_ino);
-                CHECK(start_result.error() == 0);
-                CHECK(start_result);
+                check_result_ok(start_result);
 
                 auto end_result = txn.finish_dir_rewrite();
-                CHECK(end_result.error() == 0);
-                CHECK(end_result);
-                CHECK(txn.clean_orphans());
-                CHECK(txn.commit());
+                check_result_ok(end_result);
+                check_result_ok(txn.clean_orphans());
+                check_result_ok(txn.commit());
             }
 
             THEN("The entries are gone") {
                 for (ino_t entry_ino: entry_inos) {
                     auto getattr_result = cache.getattr(entry_ino);
-                    CHECK(!getattr_result);
-                    CHECK(getattr_result.error() == ENOENT);
+                    check_result_error(getattr_result, ENOENT);
                 }
             }
 
             THEN("The entries do not show up in readdir") {
                 auto txn = cache.begin_ro();
                 auto readdir_result = txn.readdir(dir_ino, Dragonstash::INVALID_INO);
-                REQUIRE(readdir_result);
+                require_result_ok(readdir_result);
                 CHECK(readdir_result->name == ".");
 
                 readdir_result = txn.readdir(dir_ino, readdir_result->ino);
-                CHECK(!readdir_result);
-                CHECK(readdir_result.error() == 0);
+                check_result_error(readdir_result, 0);
             }
         }
 
@@ -1777,42 +1662,36 @@ SCENARIO("Directory rewriting") {
             {
                 auto txn = cache.begin_rw();
                 auto start_result = txn.start_dir_rewrite(dir_ino);
-                CHECK(start_result.error() == 0);
-                CHECK(start_result);
+                check_result_ok(start_result);
 
                 auto emplace_result = txn.emplace(dir_ino, "e1", dir_attr);
-                REQUIRE(emplace_result);
+                require_result_ok(emplace_result);
                 CHECK(*emplace_result == entry_inos[0]);
 
                 emplace_result = txn.emplace(dir_ino, "e3", reg_attr);
-                REQUIRE(emplace_result);
+                require_result_ok(emplace_result);
                 CHECK(*emplace_result == entry_inos[2]);
 
-                auto end_result = txn.finish_dir_rewrite();
-                CHECK(end_result.error() == 0);
-                CHECK(end_result);
-                CHECK(txn.clean_orphans());
-                CHECK(txn.commit());
+                check_result_ok(txn.finish_dir_rewrite());
+                check_result_ok(txn.clean_orphans());
+                check_result_ok(txn.commit());
             }
 
             THEN("The re-emplaced entries are there") {
                 {
                     auto getattr_result = cache.getattr(entry_inos[0]);
-                    CHECK(getattr_result);
-                    CHECK(getattr_result.error() == 0);
+                    check_result_ok(getattr_result);
                 }
 
                 {
                     auto getattr_result = cache.getattr(entry_inos[2]);
-                    CHECK(getattr_result);
-                    CHECK(getattr_result.error() == 0);
+                    check_result_ok(getattr_result);
                 }
             }
 
             THEN("The untouched entry is gone") {
                 auto getattr_result = cache.getattr(entry_inos[1]);
-                CHECK(!getattr_result);
-                CHECK(getattr_result.error() == ENOENT);
+                check_result_error(getattr_result, ENOENT);
             }
         }
     }

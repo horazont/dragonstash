@@ -6,6 +6,7 @@
 
 #include "testutils/tempdir.hpp"
 #include "testutils/fuse_backend.hpp"
+#include "testutils/result.hpp"
 
 class TestEnvironment {
 public:
@@ -250,8 +251,7 @@ SCENARIO("opendir and readdir") {
         WHEN("Testing the synced flag of the root directory") {
             THEN("It is unset") {
                 auto flag_result = env.cache().begin_ro().test_flag(Dragonstash::ROOT_INO, Dragonstash::InodeFlag::SYNCED);
-                CHECK(flag_result.error() == 0);
-                REQUIRE(flag_result);
+                require_result_ok(flag_result);
                 CHECK(!*flag_result);
             }
         }
@@ -267,29 +267,26 @@ SCENARIO("opendir and readdir") {
 
             THEN("The root directory is marked as synced") {
                 auto flag_result = env.cache().begin_ro().test_flag(Dragonstash::ROOT_INO, Dragonstash::InodeFlag::SYNCED);
-                CHECK(flag_result.error() == 0);
-                REQUIRE(flag_result);
+                require_result_ok(flag_result);
                 CHECK(*flag_result);
             }
 
             THEN("Child directories are not marked as synced") {
                 auto txn = env.cache().begin_ro();
                 auto lookup_result = txn.lookup(Dragonstash::ROOT_INO, "books");
-                CHECK(lookup_result.error() == 0);
-                REQUIRE(lookup_result);
+                require_result_ok(lookup_result);
 
                 auto flag_result = txn.test_flag(*lookup_result, Dragonstash::InodeFlag::SYNCED);
-                CHECK(flag_result.error() == 0);
-                REQUIRE(flag_result);
+                require_result_ok(flag_result);
                 CHECK(!*flag_result);
             }
 
             THEN("Dot cannot be looked up in the cache") {
-                CHECK(!env.cache().lookup(Dragonstash::ROOT_INO, "."));
+                check_result_error(env.cache().lookup(Dragonstash::ROOT_INO, "."), ENOENT);
             }
 
             THEN("Dotdot cannot be looked up in the cache") {
-                CHECK(!env.cache().lookup(Dragonstash::ROOT_INO, ".."));
+                check_result_error(env.cache().lookup(Dragonstash::ROOT_INO, ".."), ENOENT);
             }
 
             AND_WHEN("Setting the backend to disconnected") {
@@ -371,9 +368,9 @@ SCENARIO("opendir and readdir") {
 
             AND_WHEN("Calling opendir again") {
                 auto lookup_result_1 = env.cache().lookup(Dragonstash::ROOT_INO, "README.md");
-                REQUIRE(lookup_result_1);
+                require_result_ok(lookup_result_1);
                 auto lookup_result_2 = env.cache().lookup(Dragonstash::ROOT_INO, "books");
-                REQUIRE(lookup_result_2);
+                require_result_ok(lookup_result_2);
 
                 auto req = env.fuse().new_request();
                 struct fuse_file_info fi{};
@@ -382,9 +379,9 @@ SCENARIO("opendir and readdir") {
 
                 THEN("Inode numbers do not change") {
                     auto lookup_result_1_test = env.cache().lookup(Dragonstash::ROOT_INO, "README.md");
-                    REQUIRE(lookup_result_1_test);
+                    require_result_ok(lookup_result_1_test);
                     auto lookup_result_2_test = env.cache().lookup(Dragonstash::ROOT_INO, "books");
-                    REQUIRE(lookup_result_2_test);
+                    require_result_ok(lookup_result_2_test);
 
                     CHECK(*lookup_result_1 == *lookup_result_1_test);
                     CHECK(*lookup_result_2 == *lookup_result_2_test);
@@ -395,7 +392,7 @@ SCENARIO("opendir and readdir") {
                 env.backend().remove("README.md");
 
                 auto lookup_result_dir = env.cache().lookup(Dragonstash::ROOT_INO, "books");
-                REQUIRE(lookup_result_dir);
+                require_result_ok(lookup_result_dir);
 
                 auto req = env.fuse().new_request();
                 struct fuse_file_info fi{};
@@ -412,7 +409,7 @@ SCENARIO("opendir and readdir") {
 
                     THEN("The inode number for the directory is still intact") {
                         auto lookup_result_dir_test = env.cache().lookup(Dragonstash::ROOT_INO, "books");
-                        REQUIRE(lookup_result_dir_test);
+                        require_result_ok(lookup_result_dir_test);
 
                         CHECK(*lookup_result_dir == *lookup_result_dir_test);
                     }
