@@ -245,8 +245,7 @@ Result<Stat> LocalFilesystem::lstat(std::string_view path)
         return Result<Stat>(FAILED, full_path.error());
     }
 
-    struct stat buf;
-    memset(&buf, 0, sizeof(buf));
+    struct stat buf{};
     if (::lstat(full_path->c_str(), &buf) < 0) {
         std::cout << "lstat(" << path << ") -> (stat) " << errno << std::endl;
         return Result<Stat>(FAILED, errno);
@@ -257,7 +256,31 @@ Result<Stat> LocalFilesystem::lstat(std::string_view path)
 
 Result<std::string> LocalFilesystem::readlink(std::string_view path)
 {
-    return make_result(FAILED, EOPNOTSUPP);
+    // TODO: consider changing the interface of readlink to force the caller
+    // to call lstat to avoid calling it twice for the same file during e.g.
+    // handling of ::lookup (if we decide to always sync the link from the
+    // remote on lstat-like operations)
+    const auto full_path = map_path(path);
+    if (!full_path) {
+        return make_result(FAILED, full_path.error());
+    }
+
+    struct stat stat_buf{};
+    if (::lstat(full_path->c_str(), &stat_buf) < 0) {
+        return make_result(FAILED, errno);
+    }
+
+    std::string link_buf;
+    // add one char to be able to see if the link grew in the meantime
+    link_buf.resize(stat_buf.st_size + 1);
+    ssize_t link_size = ::readlink(full_path->c_str(), link_buf.data(), link_buf.size());
+
+    if (link_size > stat_buf.st_size) {
+        // ??? meh.
+    }
+
+    link_buf.resize(link_size);
+    return link_buf;
 }
 
 }
