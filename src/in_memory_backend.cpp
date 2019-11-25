@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "in_memory_backend.hpp"
+#include "dragonstash/in_memory_backend.hpp"
 
 #include <cassert>
 #include <cstring>

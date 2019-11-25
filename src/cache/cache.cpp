@@ -22,14 +22,14 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "cache/cache.hpp"
+#include "dragonstash/cache/cache.hpp"
 
 #include <cassert>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <ctime>
 
-#include "cache/direntry.hpp"
+#include "dragonstash/cache/direntry.hpp"
 
 /**
  * LMDB database layout

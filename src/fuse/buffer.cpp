@@ -22,9 +22,9 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "fuse/buffer.hpp"
+#include "dragonstash/fuse/buffer.hpp"
 
-#include "fuse/request.hpp"
+#include "dragonstash/fuse/request.hpp"
 
 namespace Fuse {
 

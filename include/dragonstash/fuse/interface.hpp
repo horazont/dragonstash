@@ -25,12 +25,12 @@ authors named in the AUTHORS file.
 #ifndef DRAGONSTASH_FUSE_INTERFACE_H
 #define DRAGONSTASH_FUSE_INTERFACE_H
 
-#include "dragonstash-config.h"
-#include "fuse_lowlevel.h"
+#include "dragonstash/dragonstash-config.h"
+#include <fuse_lowlevel.h>
 
 #include <stdexcept>
 
-#include "fuse/request.hpp"
+#include "dragonstash/fuse/request.hpp"
 
 namespace Fuse {
 

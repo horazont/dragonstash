@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "cache/inode.hpp"
+#include "dragonstash/cache/inode.hpp"
 
 #include <cassert>
 #include <cstring>

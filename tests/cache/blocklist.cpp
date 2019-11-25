@@ -26,8 +26,8 @@ authors named in the AUTHORS file.
 
 #include <iostream>
 
-#include "cache/common.hpp"
-#include "cache/blocklist.hpp"
+#include "dragonstash/cache/common.hpp"
+#include "dragonstash/cache/blocklist.hpp"
 
 #include "testutils/tempdir.hpp"
 

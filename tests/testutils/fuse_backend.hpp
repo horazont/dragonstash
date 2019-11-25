@@ -30,7 +30,7 @@ authors named in the AUTHORS file.
 #include <variant>
 #include <tuple>
 
-#include "fuse/request.hpp"
+#include "dragonstash/fuse/request.hpp"
 
 
 enum class TestFuseReplyType {

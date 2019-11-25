@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "backend.hpp"
+#include "dragonstash/backend.hpp"
 
 namespace Dragonstash::Backend {
 

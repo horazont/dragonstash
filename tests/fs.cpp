@@ -24,9 +24,9 @@ authors named in the AUTHORS file.
 **********************************************************************/
 #include <catch2/catch.hpp>
 
-#include "in_memory_backend.hpp"
-#include "cache/cache.hpp"
-#include "fs.hpp"
+#include "dragonstash/in_memory_backend.hpp"
+#include "dragonstash/cache/cache.hpp"
+#include "dragonstash/fs.hpp"
 
 #include "testutils/tempdir.hpp"
 #include "testutils/fuse_backend.hpp"

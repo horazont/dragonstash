@@ -22,18 +22,18 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "fuse/request.hpp"
-#include "fuse/buffer.hpp"
-#include "fuse/interface.hpp"
-#include "fs.hpp"
+#include "dragonstash/fuse/request.hpp"
+#include "dragonstash/fuse/buffer.hpp"
+#include "dragonstash/fuse/interface.hpp"
+#include "dragonstash/fs.hpp"
 
 #include <iostream>
 #include <cstring>
 
-#include "local_backend.hpp"
-#include "in_memory_backend.hpp"
+#include "dragonstash/local_backend.hpp"
+#include "dragonstash/in_memory_backend.hpp"
 
-#include "CLI/CLI.hpp"
+#include <CLI/CLI.hpp>
 
 class MountCommand
 {

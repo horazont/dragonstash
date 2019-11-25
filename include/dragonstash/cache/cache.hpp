@@ -31,14 +31,14 @@ authors named in the AUTHORS file.
 #include <mutex>
 #include <list>
 
-#include "error.hpp"
+#include "dragonstash/error.hpp"
 
 #include "lmdb-safe.hh"
-#include "backend.hpp"
-#include "debug_mutex.hpp"
+#include "dragonstash/backend.hpp"
+#include "dragonstash/debug_mutex.hpp"
 
-#include "cache/inode.hpp"
-#include "cache/common.hpp"
+#include "dragonstash/cache/inode.hpp"
+#include "dragonstash/cache/common.hpp"
 
 namespace Dragonstash {
 

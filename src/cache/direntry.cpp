@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "cache/direntry.hpp"
+#include "dragonstash/cache/direntry.hpp"
 
 #include <cassert>
 

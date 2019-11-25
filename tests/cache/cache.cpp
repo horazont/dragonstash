@@ -36,7 +36,7 @@ authors named in the AUTHORS file.
 #include <ctime>
 #include <chrono>
 
-#include "cache/cache.hpp"
+#include "dragonstash/cache/cache.hpp"
 #include "testutils/tempdir.hpp"
 #include "testutils/result.hpp"
 

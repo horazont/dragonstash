@@ -25,8 +25,8 @@ authors named in the AUTHORS file.
 #ifndef DRAGONSTASH_FUSE_REQUEST_H
 #define DRAGONSTASH_FUSE_REQUEST_H
 
-#include "dragonstash-config.h"
-#include "fuse_lowlevel.h"
+#include "dragonstash/dragonstash-config.h"
+#include <fuse_lowlevel.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>

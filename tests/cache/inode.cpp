@@ -26,7 +26,7 @@ authors named in the AUTHORS file.
 
 #include <sys/stat.h>
 
-#include "cache/inode.hpp"
+#include "dragonstash/cache/inode.hpp"
 
 SCENARIO("Inode serialization") {
     GIVEN("an Inode") {

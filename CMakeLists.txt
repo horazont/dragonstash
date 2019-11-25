@@ -31,21 +31,21 @@ add_subdirectory(CLI11)
 # MAIN THING
 
 set(DRAGONSTASH_HEADERS
-    include/dragonstash-config.h
-    include/backend.hpp
-    include/cache/blocklist.hpp
-    include/cache/cache.hpp
-    include/cache/common.hpp
-    include/cache/direntry.hpp
-    include/cache/inode.hpp
-    include/debug_mutex.hpp
-    include/error.hpp
-    include/fuse/buffer.hpp
-    include/fuse/interface.hpp
-    include/fuse/request.hpp
-    include/fs.hpp
-    include/in_memory_backend.hpp
-    include/local_backend.hpp
+    include/dragonstash/dragonstash-config.h
+    include/dragonstash/backend.hpp
+    include/dragonstash/cache/blocklist.hpp
+    include/dragonstash/cache/cache.hpp
+    include/dragonstash/cache/common.hpp
+    include/dragonstash/cache/direntry.hpp
+    include/dragonstash/cache/inode.hpp
+    include/dragonstash/debug_mutex.hpp
+    include/dragonstash/error.hpp
+    include/dragonstash/fuse/buffer.hpp
+    include/dragonstash/fuse/interface.hpp
+    include/dragonstash/fuse/request.hpp
+    include/dragonstash/fs.hpp
+    include/dragonstash/in_memory_backend.hpp
+    include/dragonstash/local_backend.hpp
     )
 
 set(DRAGONSTASH_SRCS

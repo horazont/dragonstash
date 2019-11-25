@@ -28,7 +28,7 @@ authors named in the AUTHORS file.
 #include <sys/types.h>
 #include <fcntl.h>
 
-#include "in_memory_backend.hpp"
+#include "dragonstash/in_memory_backend.hpp"
 
 using namespace Dragonstash::Backend;
 

@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "cache/blocklist.hpp"
+#include "dragonstash/cache/blocklist.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -35,7 +35,7 @@ authors named in the AUTHORS file.
 #include <unistd.h>
 #include <iostream>
 
-#include "cache/common.hpp"
+#include "dragonstash/cache/common.hpp"
 
 
 namespace Dragonstash {
