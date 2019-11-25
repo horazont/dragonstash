@@ -1,5 +1,5 @@
 /**********************************************************************
-File name: local_backend.hpp
+File name: local.hpp
 This file is part of: DragonStash
 
 LICENSE
@@ -29,7 +29,7 @@ authors named in the AUTHORS file.
 
 #include <dirent.h>
 
-#include "backend.hpp"
+#include "dragonstash/backend/base.hpp"
 
 namespace Dragonstash {
 namespace Backend {

@@ -30,8 +30,8 @@ authors named in the AUTHORS file.
 #include <iostream>
 #include <cstring>
 
-#include "dragonstash/local_backend.hpp"
-#include "dragonstash/in_memory_backend.hpp"
+#include "dragonstash/backend/local.hpp"
+#include "dragonstash/backend/in_memory.hpp"
 
 #include <CLI/CLI.hpp>
 

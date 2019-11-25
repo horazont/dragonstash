@@ -1,5 +1,5 @@
 /**********************************************************************
-File name: in_memory_backend.cpp
+File name: in_memory.cpp
 This file is part of: DragonStash
 
 LICENSE
@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "dragonstash/in_memory_backend.hpp"
+#include "dragonstash/backend/in_memory.hpp"
 
 #include <cassert>
 #include <cstring>

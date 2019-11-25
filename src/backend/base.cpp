@@ -1,5 +1,5 @@
 /**********************************************************************
-File name: backend.cpp
+File name: base.cpp
 This file is part of: DragonStash
 
 LICENSE
@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "dragonstash/backend.hpp"
+#include "dragonstash/backend/base.hpp"
 
 namespace Dragonstash::Backend {
 

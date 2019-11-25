@@ -36,7 +36,7 @@ authors named in the AUTHORS file.
 #endif
 
 #include "dragonstash/error.hpp"
-#include "dragonstash/backend.hpp"
+#include "dragonstash/backend/base.hpp"
 #include "dragonstash/cache/common.hpp"
 
 namespace Dragonstash {

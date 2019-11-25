@@ -32,7 +32,9 @@ add_subdirectory(CLI11)
 
 set(DRAGONSTASH_HEADERS
     include/dragonstash/dragonstash-config.h
-    include/dragonstash/backend.hpp
+    include/dragonstash/backend/base.hpp
+    include/dragonstash/backend/in_memory.hpp
+    include/dragonstash/backend/local.hpp
     include/dragonstash/cache/blocklist.hpp
     include/dragonstash/cache/cache.hpp
     include/dragonstash/cache/common.hpp
@@ -44,12 +46,12 @@ set(DRAGONSTASH_HEADERS
     include/dragonstash/fuse/interface.hpp
     include/dragonstash/fuse/request.hpp
     include/dragonstash/fs.hpp
-    include/dragonstash/in_memory_backend.hpp
-    include/dragonstash/local_backend.hpp
     )
 
 set(DRAGONSTASH_SRCS
-    src/backend.cpp
+    src/backend/base.cpp
+    src/backend/in_memory.cpp
+    src/backend/local.cpp
     src/cache/blocklist.cpp
     src/cache/cache.cpp
     src/cache/direntry.cpp
@@ -59,8 +61,6 @@ set(DRAGONSTASH_SRCS
     src/fuse/buffer.cpp
     src/fuse/interface.cpp
     src/fuse/request.cpp
-    src/in_memory_backend.cpp
-    src/local_backend.cpp
     src/fs.cpp)
 
 set(DRAGONSTASH_FLAGS -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
@@ -80,7 +80,7 @@ target_compile_options(dragonstashfs PRIVATE ${DRAGONSTASH_FLAGS})
 
 set(TESTS_SRCS
     tests/main.cpp
-    tests/in_memory_backend.cpp
+    tests/backend/in_memory.cpp
     tests/fs.cpp
     tests/cache/cache.cpp
     tests/cache/inode.cpp

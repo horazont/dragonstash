@@ -1,5 +1,5 @@
 /**********************************************************************
-File name: backend.hpp
+File name: base.hpp
 This file is part of: DragonStash
 
 LICENSE
@@ -22,15 +22,15 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#ifndef DRAGONSTASH_BACKEND_H
-#define DRAGONSTASH_BACKEND_H
+#ifndef DRAGONSTASH_BACKEND_BASE_H
+#define DRAGONSTASH_BACKEND_BASE_H
 
 #include <cstdint>
 #include <string>
 #include <memory>
 #include <optional>
 
-#include "error.hpp"
+#include "dragonstash/error.hpp"
 
 namespace Dragonstash::Backend {
 

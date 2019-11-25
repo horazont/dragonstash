@@ -29,7 +29,7 @@ authors named in the AUTHORS file.
 #include <memory>
 
 #include "fuse/interface.hpp"
-#include "backend.hpp"
+#include "dragonstash/backend/base.hpp"
 #include "cache/cache.hpp"
 
 namespace Dragonstash {

@@ -34,7 +34,7 @@ authors named in the AUTHORS file.
 #include "dragonstash/error.hpp"
 
 #include "lmdb-safe.hh"
-#include "dragonstash/backend.hpp"
+#include "dragonstash/backend/base.hpp"
 #include "dragonstash/debug_mutex.hpp"
 
 #include "dragonstash/cache/inode.hpp"

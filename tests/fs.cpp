@@ -24,7 +24,7 @@ authors named in the AUTHORS file.
 **********************************************************************/
 #include <catch2/catch.hpp>
 
-#include "dragonstash/in_memory_backend.hpp"
+#include "dragonstash/backend/in_memory.hpp"
 #include "dragonstash/cache/cache.hpp"
 #include "dragonstash/fs.hpp"
 

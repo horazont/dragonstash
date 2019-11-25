@@ -1,5 +1,5 @@
 /**********************************************************************
-File name: local_backend.cpp
+File name: local.cpp
 This file is part of: DragonStash
 
 LICENSE
@@ -22,7 +22,7 @@ FEEDBACK & QUESTIONS
 For feedback and questions about DragonStash please e-mail one of the
 authors named in the AUTHORS file.
 **********************************************************************/
-#include "dragonstash/local_backend.hpp"
+#include "dragonstash/backend/local.hpp"
 
 #include <sys/types.h>
 #include <sys/stat.h>

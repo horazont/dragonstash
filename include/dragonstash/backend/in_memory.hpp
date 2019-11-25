@@ -1,5 +1,5 @@
 /**********************************************************************
-File name: in_memory_backend.hpp
+File name: in_memory.hpp
 This file is part of: DragonStash
 
 LICENSE
@@ -29,7 +29,7 @@ authors named in the AUTHORS file.
 #include <string>
 #include <unordered_map>
 
-#include "backend.hpp"
+#include "dragonstash/backend/base.hpp"
 
 namespace Dragonstash::Backend {
 
