@@ -63,16 +63,18 @@ set(DRAGONSTASH_SRCS
     src/local_backend.cpp
     src/fs.cpp)
 
-add_library(libdragonstash STATIC ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
-target_link_libraries(libdragonstash PkgConfig::FUSE3)
-target_link_libraries(libdragonstash lmdb-safe)
-target_include_directories(libdragonstash PUBLIC include)
-target_compile_options(libdragonstash PRIVATE -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
+set(DRAGONSTASH_FLAGS -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
 
-add_executable(dragonstash src/main.cpp)
-target_link_libraries(dragonstash libdragonstash)
-target_link_libraries(dragonstash CLI11)
-target_compile_options(dragonstash PRIVATE -Wall -Wno-missing-field-initializers -Wno-comment -Wno-unused-parameter -Werror -Wextra)
+add_library(dragonstash STATIC ${DRAGONSTASH_SRCS} ${DRAGONSTASH_HEADERS})
+target_link_libraries(dragonstash PkgConfig::FUSE3)
+target_link_libraries(dragonstash lmdb-safe)
+target_include_directories(dragonstash PUBLIC include)
+target_compile_options(dragonstash PRIVATE ${DRAGONSTASH_FLAGS})
+
+add_executable(dragonstashfs src/main.cpp)
+target_link_libraries(dragonstashfs dragonstash)
+target_link_libraries(dragonstashfs CLI11)
+target_compile_options(dragonstashfs PRIVATE ${DRAGONSTASH_FLAGS})
 
 # UNIT TESTS
 
@@ -87,7 +89,7 @@ set(TESTS_SRCS
     tests/testutils/fuse_backend.cpp)
 
 add_executable(dragonstash-tests ${TESTS_SRCS})
-target_link_libraries(dragonstash-tests Catch2::Catch2 lmdb-safe libdragonstash)
+target_link_libraries(dragonstash-tests Catch2::Catch2 lmdb-safe dragonstash)
 target_include_directories(dragonstash-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
 
